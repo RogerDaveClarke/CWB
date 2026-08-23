@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Marine Fleet Telemetry Map Dashboard</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body, html { margin: 0; padding: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+        #app-container { display: flex; height: 100vh; }
+        #map { flex: 1; height: 100%; }
+        #sidebar { width: 340px; background: #2c3e50; color: white; padding: 20px; overflow-y: auto; box-shadow: 2px 0 10px rgba(0,0,0,0.3); }
+        .boat-card { background: #34495e; padding: 15px; margin-bottom: 12px; border-radius: 6px; border-left: 6px solid #3498db; transition: transform 0.2s; }
+        .boat-card:hover { transform: scale(1.02); }
+        .boat-card.docked { border-left-color: #2ecc71; }
+        .boat-card.moving { border-left-color: #e67e22; }
+        .boat-card.low-power { border-left-color: #e74c3c !important; }
+        .status-badge { display: inline-block; padding: 3px 8px; font-size: 0.75rem; font-weight: bold; border-radius: 4px; margin-top: 5px; }
+        .badge-docked { background: #2ecc71; color: #fff; }
+        .badge-moving { background: #e67e22; color: #fff; }
+        h2 { margin-top: 0; border-bottom: 2px solid #34495e; padding-bottom: 10px; font-size: 1.5rem; }
+    </style>
+</head>
+<body>
+
+    <div id="app-container">
+        <div id="sidebar">
+            <h2>Active Vessels</h2>
+            <div id="vessel-list">Awaiting connection pipeline...</div>
+        </div>
+        <div id="map"></div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getFirestore, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+        // Replace config directly with details from your Firebase Console properties view
+        const firebaseConfig = {
+            apiKey: "AIzaSyYourActualAPIKeyHere...",
+            authDomain: "your-project-id.firebaseapp.com",
+            projectId: "your-project-id",
+            storageBucket: "your-project-id.appspot.com",
+            messagingSenderId: "1234567890",
+            appId: "1:1234567890:web:abcdef123456"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        const map = L.map('map').setView([25.0, -80.0], 6); 
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        const markers = {};
+
+        onSnapshot(collection(db, "boats"), (snapshot) => {
+            const listContainer = document.getElementById("vessel-list");
+            listContainer.innerHTML = ""; 
+
+            snapshot.forEach((doc) => {
+                const boat = doc.data();
+                if (!boat.last_ping) return;
+
+                const id = doc.id;
+                const { latitude, longitude, battery_mv, low_battery, mooring_status, variance_g2, timestamp } = boat.last_ping;
+                const dateStr = timestamp ? new Date(timestamp.seconds * 1000).toLocaleString() : 'Pending Synchronize';
+                const isDocked = mooring_status === "Tied Up at Dock";
+
+                if (markers[id]) {
+                    markers[id].setLatLng([latitude, longitude]);
+                } else {
+                    markers[id] = L.marker([latitude, longitude]).addTo(map);
+                }
+
+                const statusPopup = `<b>Vessel: ${id}</b><br>State: ${mooring_status}<br>Variance: ${variance_g2.toFixed(4)}g²<br>Battery: ${battery_mv}mV`;
+                markers[id].bindPopup(statusPopup);
+
+                const card = document.createElement("div");
+                card.className = `boat-card ${isDocked ? 'docked' : 'moving'} ${low_battery ? 'low-power' : ''}`;
+                card.innerHTML = `
+                    <strong>Vessel ID: ${id}</strong><br>
+                    <span>Pos: ${latitude.toFixed(5)}, ${longitude.toFixed(5)}</span><br>
+                    <small>Ping: ${dateStr}</small><br>
+                    <div class="status-badge ${isDocked ? 'badge-docked' : 'badge-moving'}">${mooring_status}</div><br>
+                    <small style="color: #bdc3c7;">Variance: ${variance_g2.toFixed(5)} g² | Power: ${battery_mv} mV</small>
+                `;
+                
+                card.style.cursor = "pointer";
+                card.onclick = () => map.setView([latitude, longitude], 14);
+                listContainer.appendChild(card);
+            });
+        });
+    </script>
+</body>
+</html>

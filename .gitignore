@@ -1,0 +1,5 @@
+firmware/.pio/
+firmware/compile_commands.json
+.env
+.env.*
+firmware/include/secrets.h

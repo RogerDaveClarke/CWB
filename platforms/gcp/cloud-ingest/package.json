@@ -1,0 +1,9 @@
+{
+  "name": "marine-telemetry-ingest",
+  "version": "1.0.0",
+  "description": "GCP HTTP Cloud Function mapping LoRaWAN payloads to Firestore",
+  "main": "index.js",
+  "dependencies": {
+    "firebase-admin": "^11.8.0"
+  }
+}

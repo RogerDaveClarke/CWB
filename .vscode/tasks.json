@@ -1,0 +1,26 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "type": "platformio",
+            "task": "Build",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [
+                "$platformio"
+            ],
+            "label": "PlatformIO: Build Firmware"
+        },
+        {
+            "type": "shell",
+            "label": "Firebase: Deploy Website (GCP)",
+            "command": "firebase deploy --only hosting",
+            "options": {
+                "cwd": "${workspaceFolder}/platforms/gcp"
+            },
+            "problemMatcher": []
+        }
+    ]
+}
