@@ -1,0 +1,14 @@
+{
+  "folders": [
+    { "name": "⚓ 1. Edge Firmware", "path": "firmware" },
+    { "name": "☁️ 2. Wix Cloud Backend", "path": "wix-backend" },
+    { "name": "🗺️ 3. Wix Map Frontend", "path": "wix-frontend" }
+  ],
+  "settings": {
+    "files.exclude": {
+      "**/.git": true,
+      "**/.DS_Store": true
+    },
+    "markdown.preview.breaks": true
+  }
+}
