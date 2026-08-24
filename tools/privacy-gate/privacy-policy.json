@@ -1,0 +1,96 @@
+{
+  "$comment": "Privacy gate policy. Acknowledgements expire: an expired entry fails the build.",
+  "identityKeys": ["booked_by", "bookedBy", "renter_name", "customer_name", "renter", "email", "phone"],
+  "locationKeys": ["latitude", "longitude", "lat", "lon", "coordinates", "geo", "last_ping"],
+  "sensitivePathPatterns": ["/boats/\\{boatId\\}$", "/boats/\\{boatId\\}/history/\\{document\\}$"],
+  "claimSurfaces": [
+    "platforms/gcp/frontend/history.html",
+    "platforms/gcp/frontend/history.js",
+    "platforms/gcp/frontend/index.html"
+  ],
+  "retention": {
+    "gcpTrailMaxDays": null,
+    "gcpPurgeImplementation": "platforms/gcp/cloud-ingest/retention.js"
+  },
+  "rules": {
+    "P001": {
+      "severity": "error",
+      "title": "Renter identity and precise location are world-readable",
+      "statutes": [
+        "RCW 19.373.050(1)(a) access restriction",
+        "RCW 19.373.030(1) collection/sharing consent",
+        "FTC Act s5, 15 U.S.C. 45",
+        "RCW 19.255.010 breach notification exposure"
+      ],
+      "remediation": "Move booked_by out of the publicly readable boat document into an admin-only collection, and require auth to read boats/{id}/history."
+    },
+    "P002": {
+      "severity": "error",
+      "title": "Retained rental log permits identity or location keys",
+      "statutes": ["RCW 19.373.010(10) deidentified data", "FTC Act s5, 15 U.S.C. 45"],
+      "remediation": "Remove identity and location keys from the rental_history hasOnly() allowlist in firestore.rules."
+    },
+    "P003": {
+      "severity": "error",
+      "title": "GPS trail is written without an active-rental gate",
+      "statutes": ["RCW 19.373.030(1)(a)(ii) necessity", "FTC Act s5, 15 U.S.C. 45"],
+      "remediation": "Gate history writes in cloud-ingest on tracking_enabled so idle boats never accumulate a trail."
+    },
+    "P004": {
+      "severity": "error",
+      "title": "Check-in does not fully erase rental data",
+      "statutes": ["RCW 19.373.040(1)(c) right to delete"],
+      "remediation": "Ensure check-in deletes boats/{id}/history and clears renter identity fields."
+    },
+    "P005": {
+      "severity": "error",
+      "title": "Anonymisation claim overstates a pseudonymous record",
+      "statutes": ["FTC Act s5, 15 U.S.C. 45", "RCW 19.373.010(10)", "RCW 19.86 CPA"],
+      "remediation": "State precisely what is retained, or stop retaining the persistent device identifier."
+    },
+    "P006": {
+      "severity": "warn",
+      "title": "GPS trail retention is unbounded without a check-in",
+      "statutes": ["RCW 19.373.030(1)(a)(ii) necessity", "RCW 19.373.050(1)(b) reasonable security"],
+      "remediation": "Add a scheduled purge that deletes trails older than the maximum rental window."
+    },
+    "P007": {
+      "severity": "warn",
+      "title": "No consent artifact is recorded before location collection",
+      "statutes": ["RCW 19.373.030(1)(a) and (1)(c) prior consent"],
+      "remediation": "Record who consented, to what, and when, at check-out; keep it separate from general terms."
+    },
+    "P008": {
+      "severity": "warn",
+      "title": "No privacy policy link on a page that collects personal information",
+      "statutes": ["RCW 19.373.020(1)(b) homepage link"],
+      "remediation": "Publish a consumer health data privacy policy and link it from every page that collects personal information."
+    }
+  },
+  "acknowledged": [
+    {
+      "id": "P001",
+      "owner": "CWB technical lead",
+      "reason": "Pre-existing POC design: the public dashboard reads Firestore unauthenticated. Closing this requires splitting renter identity into an admin-only collection and adding auth to the public map, which is a product decision.",
+      "reviewBy": "2026-09-23"
+    },
+    {
+      "id": "P006",
+      "owner": "CWB technical lead",
+      "reason": "Trails are erased at check-in. An abandoned rental that is never checked in retains a trail indefinitely; a scheduled purge is planned alongside the GCP-to-Wix decision.",
+      "reviewBy": "2026-09-23"
+    },
+    {
+      "id": "P007",
+      "owner": "CWB operations lead",
+      "reason": "The check-out dialog discloses tracking verbally to the renter but records no consent artifact. Wording and record format need CWB counsel review before implementation.",
+      "reviewBy": "2026-09-23"
+    },
+    {
+      "id": "P008",
+      "owner": "CWB operations lead",
+      "reason": "CWB has no published consumer health data privacy policy yet. Blocked on the applicability determination in docs/privacy-compliance-review.md.",
+      "reviewBy": "2026-09-23"
+    }
+  ]
+}

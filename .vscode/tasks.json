@@ -2,6 +2,19 @@
     "version": "2.0.0",
     "tasks": [
         {
+            "type": "shell",
+            "label": "Privacy: Compliance Gate",
+            "command": "node",
+            "args": [
+                "${workspaceFolder}/tools/privacy-gate/privacy-gate.mjs"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            },
+            "problemMatcher": []
+        },
+        {
             "type": "platformio",
             "task": "Build",
             "group": {
@@ -11,6 +24,10 @@
             "problemMatcher": [
                 "$platformio"
             ],
+            "dependsOn": [
+                "Privacy: Compliance Gate"
+            ],
+            "dependsOrder": "sequence",
             "label": "PlatformIO: Build Firmware"
         },
         {
@@ -20,6 +37,10 @@
             "options": {
                 "cwd": "${workspaceFolder}/platforms/gcp"
             },
+            "dependsOn": [
+                "Privacy: Compliance Gate"
+            ],
+            "dependsOrder": "sequence",
             "problemMatcher": []
         }
     ]

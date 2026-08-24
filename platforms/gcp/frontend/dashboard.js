@@ -111,7 +111,7 @@ function setConnection(mode, label) { elements.connection.className = `connectio
 function readDemoRentalHistory() { try { return JSON.parse(localStorage.getItem(DEMO_RENTAL_HISTORY_KEY) || "[]"); } catch { return []; } }
 function appendDemoRentalHistory(record) { localStorage.setItem(DEMO_RENTAL_HISTORY_KEY, JSON.stringify([...readDemoRentalHistory(), record].slice(-500))); }
 
-function anonymisedRecord(boat, checkedOutAt, checkedInAt) {
+function rentalRecord(boat, checkedOutAt, checkedInAt) {
     return {
         device_id: boat.id,
         vessel_name: boat.name,
@@ -143,7 +143,7 @@ async function checkOutBoat(boat, renterName, passengerCount) {
 // Check-in is the privacy boundary: the journey trail and renter identity are destroyed here.
 async function checkInBoat(boat) {
     const checkedInAt = new Date();
-    const record = anonymisedRecord(boat, boat.timeOut, checkedInAt);
+    const record = rentalRecord(boat, boat.timeOut, checkedInAt);
     state.histories.delete(boat.id);
     if (state.routeLayer && state.selectedId === boat.id) { state.routeLayer.remove(); state.routeLayer = null; }
 
