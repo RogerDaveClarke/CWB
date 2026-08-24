@@ -32,6 +32,13 @@ const int32_t DOCK_LATITUDE_E7 = 476279500;
 const int32_t DOCK_LONGITUDE_E7 = -1223364500;
 const float DOCK_GEOFENCE_RADIUS_METERS = 55.0;
 
+// Reporting cadence. Shorter intervals sharpen the heading vector and cost battery.
+const uint8_t DEFAULT_REPORT_INTERVAL_MINUTES = 3;
+const uint8_t MIN_REPORT_INTERVAL_MINUTES = 1;
+const uint8_t MAX_REPORT_INTERVAL_MINUTES = 60;
+const uint8_t CONFIG_DOWNLINK_PORT = 2;
+uint8_t reportIntervalMinutes = DEFAULT_REPORT_INTERVAL_MINUTES;
+
 // LoRaWAN OTAA credentials must match the private ChirpStack device registration.
 uint64_t joinEui = 0x0000000000000000;
 uint64_t devEui  = 0x0000000000000000;
@@ -54,6 +61,13 @@ struct __attribute__((__packed__)) Payload {
 static_assert(sizeof(Payload) == 16, "Telemetry protocol v1 payload must be 16 bytes");
 
 void rtc_wake_isr() {}
+
+bool apply_report_interval(uint8_t minutes) {
+    if (minutes < MIN_REPORT_INTERVAL_MINUTES || minutes > MAX_REPORT_INTERVAL_MINUTES) return false;
+    reportIntervalMinutes = minutes;
+    rtc.setCountdownTimer(reportIntervalMinutes, COUNTDOWN_MINUTES, true, true);
+    return true;
+}
 
 void enter_deep_sleep() {
     digitalWrite(VOUT_ENABLE, LOW); 
@@ -129,7 +143,7 @@ void setup() {
     attachInterrupt(digitalPinToInterrupt(RTC_INT_PIN), rtc_wake_isr, FALLING);
     if (!rtc.begin()) { while(1); }
     rtc.disableTrickleCharge();
-    rtc.setCountdownTimer(15, COUNTDOWN_MINUTES, true, true);
+    apply_report_interval(DEFAULT_REPORT_INTERVAL_MINUTES);
     rtc.enableInterrupt(INTERRUPT_TIE);
     
     if(!gps.begin()) { while(1); }
