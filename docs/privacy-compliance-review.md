@@ -221,5 +221,5 @@ CI. Findings that cannot be fixed immediately are recorded in
 `tools/privacy-gate/privacy-policy.json` with an owner and a `reviewBy` date;
 **acknowledgements expire and the build fails once they do.**
 
-The agent skill at `.github/skills/privacy-compliance-review/SKILL.md` guides
+The agent at `.github/agents/PrivacyChecker.agent.md` guides
 review of new data flows, which no linter can assess.
