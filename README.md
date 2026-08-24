@@ -32,10 +32,14 @@ The MLX90621 is retained as evaluation hardware. Melexis's published driver uses
 ## Data Storage and Webpage
 Initially the webpage will be hosted in GCP using firebase to store the data  for the POC phase. However, longer term this imposes a cost on the CWB which, being a charity, is not desirible.
 
+The LoRaWAN network is independent of Helium. An outdoor US915 gateway on the boathouse forwards packets over the CWB Ethernet LAN to a private ChirpStack v4 server. ChirpStack authenticates OTAA devices, decrypts uplinks, and sends JSON HTTP events to the selected application adapter. During the POC the adapter is GCP; after approval the ChirpStack HTTP integration is changed to Wix without modifying or reflashing the tracker firmware.
+
+See `docs/private-chirpstack.md` for server, gateway, device-profile, and webhook setup.
+
 Post-POC the following approach will be taken:
 ### Wix Velo Dev Mode
 Step-by-Step Wix Integration GuideCreate the Wix CMS Database: 
-Open your Wix Editor, turn on Dev Mode / Velo, and create a new Content Collection named VesselTelemetry. Add fields for latitude (Number), longitude (Number), batteryMv (Number), variance (Number), statusString (Text), lowBattery (Boolean), gpsFix (Boolean), maxTemperatureC (Number), and timestamp (Date and Time).Expose the Webhook API: In the Wix sidebar, under Backend, create a file named http-functions.js. Paste the script provided inside the ZIP archive. Publish your site to make the endpoint live.Route the Webhook: Copy your live Wix URL (https://yourdomain.com) and paste it into the Webhook Integration section of your Helium Console or ChirpStack server.Deploy the Map Interface: On your tracking page, add a Custom Element container. Set its source script to point to the custom-element-leaflet.js file included in the ZIP bundle, and paste the page-controller logic into your main page tab.
+Open your Wix Editor, turn on Dev Mode / Velo, and create a new Content Collection named VesselTelemetry. Add fields for protocolVersion (Number), latitude (Number), longitude (Number), batteryMv (Number), variance (Number), statusString (Text), lowBattery (Boolean), gpsFix (Boolean), insideDockGeofence (Boolean), mooringClassificationValid (Boolean), maxTemperatureC (Number), and timestamp (Date and Time). Expose the webhook API using `platforms/wix/backend/http-functions.js`. Publish the site, then configure the ChirpStack HTTP integration to use `https://yourdomain.com/_functions/telemetryIngest`. Deploy the map using the files under `platforms/wix/frontend`.
 
 ## ⚓ Mooring Detection Algorithm & Classification Logic
 
@@ -59,22 +63,45 @@ $$\\mu = \\frac{1}{N} \\sum_{i=1}^{N} |a|_i$$
 $$\\sigma^2 = \\frac{1}{N} \\sum_{i=1}^{N} (|a|_i - \\mu)^2$$
 
 ### 4. Classification Decision Thresholds
+The variance classifier is gated by a 55 m circular geofence centered on the CWB dock at `47.62795, -122.33645`. A valid GPS fix must be inside this area before the firmware samples the accelerometer or determines a mooring state.
+
+*   **Inside Geofence:** The variance thresholds below produce either `Tied Up at Dock` or `Underway at Dock`.
+*   **Outside Geofence:** The variance window is not sampled and no static/moored determination is attempted. The status is `Outside Dock Geofence` and variance is stored as `null`.
+*   **No GPS Fix:** The classifier is not run and mooring status is `Unknown`.
+
 *   **Tied Up at Dock ($\\sigma^2 < 0.025\\text{g}^2$)**: A vessel tethered to fixed docks or heavy mooring slips exhibits clean, low-energy, bounded structural harmonic oscillations. Wave impacts are heavily damped by dock lines and protective bumper friction, compressing variance firmly below the trigger threshold.
 *   **Underway / In Use ($\\sigma^2 \\ge 0.025\\text{g}^2$)**: Active oars impacting rowlocks, internal footsteps, or open-water waves throwing an unconstrained hull profile produce transient, high-energy acceleration shocks across multiple axes. This erratic movement increases statistical variance past the baseline limit, flagging an active status.
 
 ---
 
 ## 📦 System File Registry
-*   `firmware/src/main.cpp`: SAMD21 firmware handling NEO-M9N positioning, RV-1805 wake timing, AMG8833 thermal sampling, LIS3DH window calculations, and **RadioLib LoRaWAN OTAA (US915)** 15-byte packaging routines.
+*   `firmware/src/main.cpp`: SAMD21 firmware handling NEO-M9N positioning, RV-1805 wake timing, AMG8833 thermal sampling, LIS3DH window calculations, and **RadioLib LoRaWAN OTAA (US915)** 16-byte versioned packaging routines.
 *   `platforms/gcp/cloud-ingest/index.js`: Node.js webhook target configured for HTTP **GCP Cloud Function** triggers.
-*   `platforms/gcp/frontend/index.html`: Static Leaflet application connected to Firestore.
+*   `platforms/gcp/frontend/index.html`: Resizable operations dashboard with the fleet table, alerts, route history, and OpenStreetMap.
+*   `platforms/gcp/frontend/admin.html`: Administrative boat registry and annual weekly rental-schedule editor.
 *   `platforms/gcp/firestore.rules`: Firestore access rules for the GCP POC.
 *   `platforms/wix/backend/`: Wix Velo ingestion and retention jobs.
 *   `platforms/wix/frontend/`: Wix page and custom-element code.
 
 ### Git and Platform Migration
 
-The repository has one platform-neutral firmware implementation. GCP and Wix are deployment adapters for the same 15-byte telemetry protocol and remain together on `main`.
+The repository has one platform-neutral firmware implementation. GCP and Wix are deployment adapters for the same versioned telemetry protocol and remain together on `main`.
+
+### Telemetry Protocol Version 1
+
+Protocol version 1 is a packed 16-byte little-endian frame:
+
+| Bytes | Type | Field | Encoding |
+| :--- | :--- | :--- | :--- |
+| 0 | `uint8` | Protocol version | `1` |
+| 1-4 | `int32` | Latitude | Decimal degrees multiplied by 10,000,000 |
+| 5-8 | `int32` | Longitude | Decimal degrees multiplied by 10,000,000 |
+| 9-10 | `uint16` | Battery | Millivolts |
+| 11-12 | `uint16` | Motion variance | g squared multiplied by 100,000 |
+| 13-14 | `int16` | Maximum temperature | Degrees Celsius multiplied by 100 |
+| 15 | `uint8` | Flags | Bit 0 low battery, bit 1 GPS fix, bit 2 tied up, bit 3 thermal valid, bit 4 mooring classification valid / inside dock geofence |
+
+The GCP adapter stores the version as `protocol_version`. The Wix adapter stores it as `protocolVersion`. Adapters reject frames with unsupported versions instead of interpreting them with the wrong layout.
 
 * Use short-lived feature branches and merge them into `main`.
 * Tag the accepted POC as `gcp-poc-v1.0`.
@@ -89,17 +116,49 @@ The repository has one platform-neutral firmware implementation. GCP and Wix are
 
 ### 1. Hardware Integration Flashing
 * PlatformIO installs the libraries declared in `firmware/platformio.ini`.
-* Modify the credentials (`devEui`, `joinEui`, `nwkKey`, and `appKey`) inside `firmware/src/main.cpp` using the tracking tokens provided by your **Helium Console** or **ChirpStack Engine**.
+* Modify the credentials (`devEui`, `joinEui`, `nwkKey`, and `appKey`) inside `firmware/src/main.cpp` to match the private ChirpStack device registration.
 * Flash onto your **Seeed Studio XIAO SAMD21** board framework.
 
 ### 2. GCP Cloud Functions Setup
 * Open terminal inside `platforms/gcp/cloud-ingest`.
 * Run deployment parameters:
   ```bash
-  gcloud functions deploy telemetryIngest --runtime nodejs18 --trigger-http --allow-unauthenticated
+  gcloud functions deploy telemetryIngest --runtime nodejs18 --trigger-http --allow-unauthenticated --set-secrets CHIRPSTACK_WEBHOOK_TOKEN=chirpstack-webhook-token:latest
   ```
 * Copy the generated function webhook target URL and paste it as an HTTP integration webhook within your LoRaWAN server network dashboard.
 
 ### 3. Frontend Map Initialization
 * Open `platforms/gcp/frontend/index.html` and replace the `firebaseConfig` object dictionary elements with your web target data properties from your Firebase Console.
 * Serve the static index bundle live using Firebase Hosting or your preferred hosting architecture.
+
+### 4. Dashboard Rental Fields
+
+The ingestion function owns `device_id` and `last_ping`. It uses a merge write, so front-desk or booking integration metadata can coexist on each `boats/{DevEUI}` document:
+
+| Field | Type | Purpose |
+| :--- | :--- | :--- |
+| `vessel_name` | String | Human-readable boat name mapped to the DevEUI |
+| `availability_status` | String | `available`, `rented`, or `maintenance` |
+| `booked` | Boolean | Whether the boat has an active reservation |
+| `booked_by` | String | Customer name associated with the reservation |
+| `passenger_count` | Number | Number of passengers assigned to the rental, from 1 through 6 |
+| `rental_type` | String | `fixed` or `open` |
+| `rental_minutes` | Number | Fixed rental duration; defaults to 60 |
+| `time_out` | Timestamp | Checkout time |
+| `time_due_back` | Timestamp | Optional explicit due time |
+| `actual_time_back` | Timestamp | Recorded return time |
+
+For fixed rentals, the dashboard uses `time_due_back` or calculates `time_out + rental_minutes`. For open rentals, it estimates return time from the last three GPS observations only when the vessel is moving toward the dock. Missing booking fields display as unavailable rather than being inferred from telemetry.
+
+### 5. Fleet Administration
+
+Open `platforms/gcp/frontend/admin.html` to configure boats. Each `boats/{DevEUI}` document can store:
+
+* Device ID and human-readable boat name.
+* Schedule year and active start/end dates.
+* Enabled state plus rental start/end time for every day of the week.
+* Availability as `Yes` (`available`) or `Under Repair` (`under_repair`).
+
+The editor defaults to a full calendar year with Monday closed and Tuesday through Sunday open from 12:30 PM to 6:30 PM. Existing Device IDs are locked in the editor because changing a DevEUI would break its telemetry and history association; create a new boat record when tracker hardware changes.
+
+With Firebase configured, administrators sign in using Google. Their Firebase Auth user must have the custom claim `admin: true`. Firestore rules permit these users to update only configuration fields. The Cloud Function continues to write telemetry through the Admin SDK, and browser clients cannot alter `last_ping` or history records.

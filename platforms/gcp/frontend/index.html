@@ -1,98 +1,90 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Marine Fleet Telemetry Map Dashboard</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <style>
-        body, html { margin: 0; padding: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
-        #app-container { display: flex; height: 100vh; }
-        #map { flex: 1; height: 100%; }
-        #sidebar { width: 340px; background: #2c3e50; color: white; padding: 20px; overflow-y: auto; box-shadow: 2px 0 10px rgba(0,0,0,0.3); }
-        .boat-card { background: #34495e; padding: 15px; margin-bottom: 12px; border-radius: 6px; border-left: 6px solid #3498db; transition: transform 0.2s; }
-        .boat-card:hover { transform: scale(1.02); }
-        .boat-card.docked { border-left-color: #2ecc71; }
-        .boat-card.moving { border-left-color: #e67e22; }
-        .boat-card.low-power { border-left-color: #e74c3c !important; }
-        .status-badge { display: inline-block; padding: 3px 8px; font-size: 0.75rem; font-weight: bold; border-radius: 4px; margin-top: 5px; }
-        .badge-docked { background: #2ecc71; color: #fff; }
-        .badge-moving { background: #e67e22; color: #fff; }
-        h2 { margin-top: 0; border-bottom: 2px solid #34495e; padding-bottom: 10px; font-size: 1.5rem; }
-    </style>
-</head>
-<body>
-
-    <div id="app-container">
-        <div id="sidebar">
-            <h2>Active Vessels</h2>
-            <div id="vessel-list">Awaiting connection pipeline...</div>
-        </div>
-        <div id="map"></div>
-    </div>
-
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-
-        // Replace config directly with details from your Firebase Console properties view
-        const firebaseConfig = {
-            apiKey: "AIzaSyYourActualAPIKeyHere...",
-            authDomain: "your-project-id.firebaseapp.com",
-            projectId: "your-project-id",
-            storageBucket: "your-project-id.appspot.com",
-            messagingSenderId: "1234567890",
-            appId: "1:1234567890:web:abcdef123456"
+    <meta name="color-scheme" content="dark light">
+    <title>CWB Rowboat Operations</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: "class",
+            theme: { extend: { fontFamily: { sans: ["DM Sans", "sans-serif"], mono: ["JetBrains Mono", "monospace"] } } }
         };
-
-        const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
-
-        const map = L.map('map').setView([25.0, -80.0], 6); 
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap contributors'
-        }).addTo(map);
-
-        const markers = {};
-
-        onSnapshot(collection(db, "boats"), (snapshot) => {
-            const listContainer = document.getElementById("vessel-list");
-            listContainer.innerHTML = ""; 
-
-            snapshot.forEach((doc) => {
-                const boat = doc.data();
-                if (!boat.last_ping) return;
-
-                const id = doc.id;
-                const { latitude, longitude, battery_mv, low_battery, mooring_status, variance_g2, timestamp } = boat.last_ping;
-                const dateStr = timestamp ? new Date(timestamp.seconds * 1000).toLocaleString() : 'Pending Synchronize';
-                const isDocked = mooring_status === "Tied Up at Dock";
-
-                if (markers[id]) {
-                    markers[id].setLatLng([latitude, longitude]);
-                } else {
-                    markers[id] = L.marker([latitude, longitude]).addTo(map);
-                }
-
-                const statusPopup = `<b>Vessel: ${id}</b><br>State: ${mooring_status}<br>Variance: ${variance_g2.toFixed(4)}g²<br>Battery: ${battery_mv}mV`;
-                markers[id].bindPopup(statusPopup);
-
-                const card = document.createElement("div");
-                card.className = `boat-card ${isDocked ? 'docked' : 'moving'} ${low_battery ? 'low-power' : ''}`;
-                card.innerHTML = `
-                    <strong>Vessel ID: ${id}</strong><br>
-                    <span>Pos: ${latitude.toFixed(5)}, ${longitude.toFixed(5)}</span><br>
-                    <small>Ping: ${dateStr}</small><br>
-                    <div class="status-badge ${isDocked ? 'badge-docked' : 'badge-moving'}">${mooring_status}</div><br>
-                    <small style="color: #bdc3c7;">Variance: ${variance_g2.toFixed(5)} g² | Power: ${battery_mv} mV</small>
-                `;
-                
-                card.style.cursor = "pointer";
-                card.onclick = () => map.setView([latitude, longitude], 14);
-                listContainer.appendChild(card);
-            });
-        });
     </script>
+    <link rel="stylesheet" href="./dashboard.css">
+</head>
+<body class="h-screen overflow-hidden bg-zinc-950 text-zinc-100 antialiased">
+    <div id="app" class="flex h-full flex-col">
+        <header class="app-header">
+            <div class="flex min-w-0 items-center gap-3">
+                <div class="brand-mark" aria-hidden="true">CWB</div>
+                <div class="hidden h-7 w-px bg-zinc-700 sm:block"></div>
+                <div class="min-w-0">
+                    <h1 class="truncate text-sm font-semibold uppercase tracking-wide sm:text-base">Rowboat Operations</h1>
+                    <p class="truncate text-[11px] text-zinc-400">Lake Union · POC telemetry dashboard</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <div id="connectionStatus" class="connection-pill" role="status"><span class="status-dot"></span><span class="hidden sm:inline">Connecting</span></div>
+                <time id="headerClock" class="hidden font-mono text-xs text-zinc-400 md:block"></time>
+                <a href="./admin.html" class="icon-button" title="Fleet administration" aria-label="Fleet administration"><i data-lucide="settings" class="h-4 w-4"></i></a>
+                <button id="themeToggle" class="icon-button" type="button" title="Toggle color theme" aria-label="Toggle color theme"><i data-lucide="sun" class="h-4 w-4"></i></button>
+                <button id="fullscreenToggle" class="icon-button" type="button" title="Toggle fullscreen" aria-label="Toggle fullscreen"><i data-lucide="maximize" class="h-4 w-4"></i></button>
+            </div>
+        </header>
+
+        <main id="workspace" class="workspace">
+            <section id="operationsPane" class="operations-pane" aria-label="Fleet operations">
+                <div class="operations-toolbar">
+                    <div><p class="eyebrow">Tue–Sun · 12:30–18:30</p><h2 class="text-lg font-semibold">Row Boat Status</h2></div>
+                    <div class="flex items-center gap-2">
+                        <label class="search-field"><i data-lucide="search" class="h-4 w-4"></i><span class="sr-only">Search vessels</span><input id="searchInput" type="search" placeholder="Find vessel" autocomplete="off"></label>
+                        <select id="statusFilter" class="select-control" aria-label="Filter by status"><option value="all">All statuses</option><option value="available">Available</option><option value="rented">Rented</option><option value="overdue">Overdue</option><option value="maintenance">Maintenance</option></select>
+                    </div>
+                </div>
+
+                <div class="metric-strip" aria-label="Fleet summary">
+                    <div><span id="metricTotal" class="metric-value">0</span><span class="metric-label">Tracked</span></div>
+                    <div><span id="metricAvailable" class="metric-value text-sky-400">0</span><span class="metric-label">Available</span></div>
+                    <div><span id="metricUnderway" class="metric-value text-emerald-400">0</span><span class="metric-label">Underway</span></div>
+                    <div><span id="metricAlerts" class="metric-value text-red-400">0</span><span class="metric-label">Alerts</span></div>
+                </div>
+
+                <div class="table-shell">
+                    <table class="min-w-full border-separate border-spacing-0 text-left text-xs">
+                        <thead class="relative z-30"><tr><th>Vessel</th><th>Availability</th><th>Booked</th><th>Booked by</th><th>No. passengers</th><th>Time out</th><th>Due / ETA</th><th>Actual return</th><th>Coordinates</th><th>Mooring</th><th>Battery</th><th>Last update</th></tr></thead>
+                        <tbody id="fleetTableBody"><tr><td colspan="12" class="empty-cell">Waiting for fleet data…</td></tr></tbody>
+                    </table>
+                </div>
+
+                <section class="alerts-panel" aria-labelledby="alertsHeading">
+                    <div class="panel-heading">
+                        <div class="flex items-center gap-2"><i data-lucide="triangle-alert" class="h-4 w-4 text-amber-400"></i><h3 id="alertsHeading">Active alerts</h3><span id="alertCount" class="count-badge">0</span></div>
+                        <button id="collapseAlerts" class="icon-button compact" type="button" title="Collapse alerts" aria-label="Collapse alerts"><i data-lucide="chevron-down" class="h-4 w-4"></i></button>
+                    </div>
+                    <div id="alertsList" class="alerts-list"></div>
+                </section>
+            </section>
+
+            <div id="splitter" class="splitter" role="separator" aria-label="Resize table and map" aria-orientation="vertical" tabindex="0"><span class="splitter-grip"><i data-lucide="grip-vertical" class="h-4 w-4"></i></span></div>
+
+            <section id="mapPane" class="map-pane" aria-label="Live vessel map">
+                <div id="map" class="h-full w-full"></div>
+                <div class="map-title"><span class="eyebrow">OpenStreetMap</span><strong>Lake Union live positions</strong></div>
+                <div class="map-legend" aria-label="Map legend"><span><i class="legend-dot bg-sky-500"></i>Available</span><span><i class="legend-dot bg-emerald-500"></i>Rented</span><span><i class="legend-dot bg-red-500"></i>Warning</span><span><i class="legend-dot bg-zinc-500"></i>Maintenance</span></div>
+                <aside id="mapDetail" class="map-detail hidden" aria-live="polite"></aside>
+            </section>
+        </main>
+
+        <footer class="status-bar"><span id="dataMode">Firebase live mode</span><span class="hidden sm:inline">Dock geofence: 55 m · Lake Union operating zone: 1.6 km</span><span id="lastRefresh" class="font-mono">No updates</span></footer>
+    </div>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+    <script type="module" src="./dashboard.js"></script>
 </body>
 </html>

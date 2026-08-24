@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark light">
+    <title>CWB Fleet Administration</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: "class",
+            theme: { extend: { fontFamily: { sans: ["DM Sans", "sans-serif"], mono: ["JetBrains Mono", "monospace"] } } }
+        };
+    </script>
+    <link rel="stylesheet" href="./dashboard.css">
+    <link rel="stylesheet" href="./admin.css">
+</head>
+<body class="h-screen overflow-hidden bg-zinc-950 text-zinc-100 antialiased">
+    <div class="flex h-full flex-col">
+        <header class="app-header">
+            <div class="flex min-w-0 items-center gap-3">
+                <a href="./index.html" class="brand-mark" aria-label="Return to operations dashboard">CWB</a>
+                <div class="hidden h-7 w-px bg-zinc-700 sm:block"></div>
+                <div class="min-w-0">
+                    <h1 class="truncate text-sm font-semibold uppercase tracking-wide sm:text-base">Fleet Administration</h1>
+                    <p class="truncate text-[11px] text-zinc-400">Boat identity and annual rental schedules</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <div id="adminConnection" class="connection-pill" role="status"><span class="status-dot"></span><span class="hidden sm:inline">Loading</span></div>
+                <a href="./index.html" class="header-command"><i data-lucide="map" class="h-4 w-4"></i><span class="hidden sm:inline">Operations</span></a>
+                <button id="signInButton" class="header-command" type="button"><i data-lucide="log-in" class="h-4 w-4"></i><span>Sign in</span></button>
+                <button id="themeToggle" class="icon-button" type="button" title="Toggle color theme" aria-label="Toggle color theme"><i data-lucide="sun" class="h-4 w-4"></i></button>
+            </div>
+        </header>
+
+        <main class="admin-workspace">
+            <section class="admin-content" aria-labelledby="fleetHeading">
+                <div class="admin-toolbar">
+                    <div>
+                        <p class="eyebrow">Configuration</p>
+                        <h2 id="fleetHeading">Boat registry</h2>
+                        <p class="admin-subtitle">Rental windows repeat weekly within each boat’s configured date range.</p>
+                    </div>
+                    <div class="admin-actions">
+                        <label class="year-control"><span>Schedule year</span><select id="yearFilter" aria-label="Schedule year"></select></label>
+                        <label class="search-field"><i data-lucide="search" class="h-4 w-4"></i><span class="sr-only">Search boats</span><input id="adminSearch" type="search" placeholder="Find boat or DevEUI" autocomplete="off"></label>
+                        <button id="addBoatButton" class="primary-button" type="button"><i data-lucide="plus" class="h-4 w-4"></i>Add boat</button>
+                    </div>
+                </div>
+
+                <div class="admin-table-shell">
+                    <table class="admin-table">
+                        <thead><tr><th>Device ID / DevEUI</th><th>Boat name</th><th>Year</th><th>Rental date range</th><th>Weekly rental hours</th><th>Available</th><th><span class="sr-only">Actions</span></th></tr></thead>
+                        <tbody id="adminTableBody"><tr><td colspan="7" class="empty-cell">Loading boat configuration…</td></tr></tbody>
+                    </table>
+                </div>
+                <div class="admin-footer"><span id="fleetCount">0 boats</span><span>Changes preserve tracker telemetry and history.</span></div>
+            </section>
+        </main>
+    </div>
+
+    <div id="drawerBackdrop" class="drawer-backdrop hidden"></div>
+    <aside id="boatDrawer" class="boat-drawer" aria-labelledby="drawerTitle" aria-hidden="true">
+        <form id="boatForm" class="drawer-form">
+            <div class="drawer-header">
+                <div><p class="eyebrow">Boat configuration</p><h2 id="drawerTitle">Add boat</h2></div>
+                <button id="closeDrawerButton" class="icon-button" type="button" title="Close editor" aria-label="Close editor"><i data-lucide="x" class="h-4 w-4"></i></button>
+            </div>
+
+            <div id="formMessage" class="form-message hidden" role="alert"></div>
+
+            <fieldset class="form-section">
+                <legend>Identity</legend>
+                <div class="form-grid two-columns">
+                    <label><span>Device ID / DevEUI</span><input id="deviceId" name="deviceId" type="text" maxlength="32" pattern="[0-9A-Fa-f]{16}" placeholder="70B3D57ED0000001" required><small>Exactly 16 hexadecimal characters.</small></label>
+                    <label><span>Boat name</span><input id="vesselName" name="vesselName" type="text" maxlength="60" placeholder="Rowboat Martha" required></label>
+                    <label><span>Available</span><select id="availability" name="availability" required><option value="available">Yes</option><option value="under_repair">Under Repair</option></select></label>
+                    <label><span>Schedule year</span><input id="scheduleYear" name="scheduleYear" type="number" min="2025" max="2100" required></label>
+                </div>
+            </fieldset>
+
+            <fieldset class="form-section">
+                <legend>Rental date range</legend>
+                <div class="form-grid two-columns">
+                    <label><span>Start date</span><input id="seasonStart" name="seasonStart" type="date" required></label>
+                    <label><span>End date</span><input id="seasonEnd" name="seasonEnd" type="date" required></label>
+                </div>
+            </fieldset>
+
+            <fieldset class="form-section schedule-section">
+                <div class="section-heading"><legend>Weekly rental hours</legend><button id="applyToOpenDays" class="secondary-button" type="button"><i data-lucide="copy" class="h-4 w-4"></i>Copy Tuesday to open days</button></div>
+                <div id="weeklySchedule" class="weekly-schedule"></div>
+            </fieldset>
+
+            <div class="drawer-actions">
+                <button id="cancelButton" class="secondary-button" type="button">Cancel</button>
+                <button id="saveButton" class="primary-button" type="submit"><i data-lucide="save" class="h-4 w-4"></i><span>Save boat</span></button>
+            </div>
+        </form>
+    </aside>
+
+    <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+    <script type="module" src="./admin.js"></script>
+</body>
+</html>

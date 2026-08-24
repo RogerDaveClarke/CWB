@@ -25,10 +25,13 @@ graph TD
         L[12V 18Ah Sealed Lead-Acid Battery] -->|Power Delivery| I[RAK7289V2 WisGate Edge Pro]
     end
 
-    %% Network & Application Cloud Routing
-    I[RAK7289V2 WisGate Edge Pro] -->|Cellular Backhaul / Public Internet| M[The Things Network v3 Cloud]
-    M[The Things Network v3 Cloud] -->|Payload Formatter / JavaScript Decryption| N[JSON Structured Telemetry Stream]
-    N[JSON Structured Telemetry Stream] -->|Secure MQTT WebSockets| O[React Web Dashboard Application]
+    %% Private Network Server and Application Routing
+    I[RAK7289V2 WisGate Edge Pro] -->|Ethernet LAN: Basics Station or UDP| M[Private ChirpStack v4 Server]
+    M[Private ChirpStack v4 Server] -->|OTAA authentication and decryption| N[ChirpStack Uplink Event]
+    N[ChirpStack Uplink Event] -->|Phase 1: HTTPS webhook| P[GCP Cloud Function and Firestore]
+    N[ChirpStack Uplink Event] -->|Phase 2: HTTPS webhook| Q[Wix Velo Backend and CMS]
+    P[GCP Cloud Function and Firestore] --> O[Leaflet Fleet Dashboard]
+    Q[Wix Velo Backend and CMS] --> O[Leaflet Fleet Dashboard]
 
     %% Styles
     style A fill:#f9f,stroke:#333,stroke-width:2px

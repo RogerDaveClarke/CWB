@@ -17,6 +17,8 @@ The SAMD21 microprocessor executes a wake phase every 15 minutes, fires up the a
 $$ \\mu = \\frac{1}{N} \\sum_{i=1}^{N} |a|_i $$
 
 ### 3. Energy Variance Classifications
+The firmware runs this classifier only when a valid GPS fix is inside the 55 m CWB dock geofence centered at `47.62795, -122.33645`. Outside this area the accelerometer classifier is not run, preventing calm open-water conditions from being labeled as tied up.
+
 Statistical signal variance is processed across the compiled sampling slice:
 $$ \\sigma^2 = \\frac{1}{N} \\sum_{i=1}^{N} (|a|_i - \\mu)^2 $$
 
@@ -56,7 +58,8 @@ All coordinate historical logs falling before this window are permanently remove
 
 ## 🛠️ Deployment Steps
 
-1. **Wix CMS Setup:** Open your Wix Editor, toggle **Dev Mode / Velo**, and create a collection named `VesselTelemetry`. Add Number fields `latitude`, `longitude`, `batteryMv`, `variance`, and `maxTemperatureC`; Boolean fields `lowBattery` and `gpsFix`; Text field `statusString`; and Date and Time field `timestamp`.
+1. **Wix CMS Setup:** Open your Wix Editor, toggle **Dev Mode / Velo**, and create a collection named `VesselTelemetry`. Add Number fields `protocolVersion`, `latitude`, `longitude`, `batteryMv`, `variance`, and `maxTemperatureC`; Boolean fields `lowBattery`, `gpsFix`, `insideDockGeofence`, and `mooringClassificationValid`; Text field `statusString`; and Date and Time field `timestamp`.
 2. **Backend Copy:** Copy the files from `backend/` (`http-functions.js`, `data-cleanup.js`, `jobs.config`) directly into your Wix Backend Explorer pane.
 3. **Frontend Map Assembly:** Create a site page, drop a **Custom Element** component wrapper box down, assign its script path source to `frontend/custom-element-leaflet.js`, and attach `frontend/page-code.js` to the main code page view layout container.
-4. **LoRaWAN Routing:** Direct your Helium Console or ChirpStack LNS application webhook to your published Wix API address: `https://yourdomain.com/_functions/telemetryIngest`.
+4. **Webhook Authentication:** Add a Wix secret named `chirpstackWebhookToken` containing a random high-entropy value. Configure the ChirpStack HTTP integration to send the same value in the `X-CWB-Webhook-Token` header.
+5. **LoRaWAN Routing:** Direct the private ChirpStack application webhook to your published Wix API address: `https://yourdomain.com/_functions/telemetryIngest`.

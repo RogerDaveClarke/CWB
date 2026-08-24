@@ -28,22 +28,30 @@ bool thermalSensorAvailable = false;
 
 const float LOW_BATTERY_LIMIT = 4.2; 
 const float MOORING_THRESHOLD = 0.025; // Variance threshold (g^2)
+const int32_t DOCK_LATITUDE_E7 = 476279500;
+const int32_t DOCK_LONGITUDE_E7 = -1223364500;
+const float DOCK_GEOFENCE_RADIUS_METERS = 55.0;
 
-// LoRaWAN OTAA Credentials (Replace with your actual keys from Helium/ChirpStack)
+// LoRaWAN OTAA credentials must match the private ChirpStack device registration.
 uint64_t joinEui = 0x0000000000000000;
 uint64_t devEui  = 0x0000000000000000;
 uint8_t appKey[] = { 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF };
 uint8_t nwkKey[] = { 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF };
 
-// Compact 15-Byte LoRaWAN Payload Setup
+const uint8_t TELEMETRY_PROTOCOL_VERSION = 1;
+
+// Compact 16-Byte LoRaWAN Payload Setup
 struct __attribute__((__packed__)) Payload {
+    uint8_t version;   // 1 Byte: Telemetry protocol version
     int32_t lat;       // 4 Bytes: Latitude scaled by 10^7
     int32_t lon;       // 4 Bytes: Longitude scaled by 10^7
     uint16_t batt_mv;  // 2 Bytes: Battery in millivolts
     uint16_t variance; // 2 Bytes: Accelerometer variance scaled by 100000
     int16_t max_temp_centi_c; // 2 Bytes: Maximum AMG8833 pixel temperature * 100
-    uint8_t flags;     // Bit 0=LowBatt, Bit 1=GPSFix, Bit 2=TiedUp, Bit 3=ThermalValid
+    uint8_t flags;     // Bit 0=LowBatt, Bit 1=GPSFix, Bit 2=TiedUp, Bit 3=ThermalValid, Bit 4=MooringValid
 };
+
+static_assert(sizeof(Payload) == 16, "Telemetry protocol v1 payload must be 16 bytes");
 
 void rtc_wake_isr() {}
 
@@ -67,6 +75,18 @@ bool read_max_temperature(int16_t &maxTempCentiC) {
     }
     maxTempCentiC = (int16_t)(maxTempC * 100.0f);
     return true;
+}
+
+bool is_inside_dock_geofence(int32_t latitudeE7, int32_t longitudeE7) {
+    const float metersPerDegree = 111320.0;
+    const float dockLatitudeRadians = (DOCK_LATITUDE_E7 / 10000000.0) * DEG_TO_RAD;
+    const float latitudeDelta = (latitudeE7 - DOCK_LATITUDE_E7) / 10000000.0;
+    const float longitudeDelta = (longitudeE7 - DOCK_LONGITUDE_E7) / 10000000.0;
+    const float northMeters = latitudeDelta * metersPerDegree;
+    const float eastMeters = longitudeDelta * metersPerDegree * cos(dockLatitudeRadians);
+    const float distanceSquared = northMeters * northMeters + eastMeters * eastMeters;
+
+    return distanceSquared <= DOCK_GEOFENCE_RADIUS_METERS * DOCK_GEOFENCE_RADIUS_METERS;
 }
 
 float calculate_accelerometer_variance() {
@@ -134,28 +154,32 @@ void setup() {
 
 void loop() {
     digitalWrite(VOUT_ENABLE, HIGH);
-    lis.setDataRate(LIS3DH_DATARATE_10_HZ); // Wake accelerometer
     delay(50); 
     
     Payload dataPacket;
+    dataPacket.version = TELEMETRY_PROTOCOL_VERSION;
     dataPacket.flags = 0x00;
+    dataPacket.lat = 0;
+    dataPacket.lon = 0;
+    dataPacket.variance = 0;
     dataPacket.max_temp_centi_c = 0;
-    
-    // 1. Process Mooring Status
-    float var = calculate_accelerometer_variance();
-    dataPacket.variance = (uint16_t)(var * 100000.0);
-    if (var < MOORING_THRESHOLD) {
-        dataPacket.flags |= 0x04; // Set Bit 2: Tied Up at Dock
-    }
-    
-    // 2. Fetch GPS Telemetry
-    if(gps.getPVT()) {
+
+    // 1. Fetch GPS telemetry before deciding whether mooring classification applies.
+    if(gps.getPVT() && gps.getFixType() >= 3) {
         dataPacket.lat = gps.getLatitude();
         dataPacket.lon = gps.getLongitude();
         dataPacket.flags |= 0x02; // Set Bit 1: GPS Fix Found
-    } else {
-        dataPacket.lat = 0;
-        dataPacket.lon = 0;
+
+        // 2. Only classify mooring state while the boat is inside the dock geofence.
+        if (is_inside_dock_geofence(dataPacket.lat, dataPacket.lon)) {
+            dataPacket.flags |= 0x10; // Set Bit 4: Mooring classification is valid
+            lis.setDataRate(LIS3DH_DATARATE_10_HZ);
+            float variance = calculate_accelerometer_variance();
+            dataPacket.variance = (uint16_t)(variance * 100000.0);
+            if (variance < MOORING_THRESHOLD) {
+                dataPacket.flags |= 0x04; // Set Bit 2: Tied Up at Dock
+            }
+        }
     }
     
     // 3. Capture the hottest thermal-array pixel
