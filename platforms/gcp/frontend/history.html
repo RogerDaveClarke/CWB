@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark light">
+    <title>CWB Rental History</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: "class",
+            theme: { extend: { fontFamily: { sans: ["DM Sans", "sans-serif"], mono: ["JetBrains Mono", "monospace"] } } }
+        };
+    </script>
+    <link rel="stylesheet" href="./dashboard.css">
+    <link rel="stylesheet" href="./admin.css">
+</head>
+<body class="h-screen overflow-hidden bg-zinc-950 text-zinc-100 antialiased">
+    <div class="flex h-full flex-col">
+        <header class="app-header">
+            <div class="flex min-w-0 items-center gap-3">
+                <a href="./index.html" class="brand-mark" aria-label="Return to operations dashboard">CWB</a>
+                <div class="hidden h-7 w-px bg-zinc-700 sm:block"></div>
+                <div class="min-w-0">
+                    <h1 class="truncate text-sm font-semibold uppercase tracking-wide sm:text-base">Rental History</h1>
+                    <p class="truncate text-[11px] text-zinc-400">Anonymised record of completed rentals</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <div id="historyConnection" class="connection-pill" role="status"><span class="status-dot"></span><span class="hidden sm:inline">Loading</span></div>
+                <a href="./index.html" class="header-command"><i data-lucide="map" class="h-4 w-4"></i><span class="hidden sm:inline">Operations</span></a>
+                <a href="./admin.html" class="icon-button" title="Fleet administration" aria-label="Fleet administration"><i data-lucide="settings" class="h-4 w-4"></i></a>
+                <button id="themeToggle" class="icon-button" type="button" title="Toggle color theme" aria-label="Toggle color theme"><i data-lucide="sun" class="h-4 w-4"></i></button>
+            </div>
+        </header>
+
+        <main class="admin-workspace">
+            <section class="admin-content with-banner" aria-labelledby="historyHeading">
+                <div class="admin-toolbar">
+                    <div>
+                        <p class="eyebrow">Completed rentals</p>
+                        <h2 id="historyHeading">Boat rental history</h2>
+                        <p class="admin-subtitle">Renter names and GPS routes are erased at check-in and are not recoverable.</p>
+                    </div>
+                    <div class="admin-actions">
+                        <label class="search-field"><i data-lucide="search" class="h-4 w-4"></i><span class="sr-only">Search boats</span><input id="historySearch" type="search" placeholder="Find boat" autocomplete="off"></label>
+                    </div>
+                </div>
+
+                <div class="privacy-banner">
+                    <i data-lucide="shield-check" class="h-4 w-4 shrink-0 text-emerald-400"></i>
+                    <span>This log retains only the boat, the rental times, and the party size. It holds no customer identity and no location data.</span>
+                </div>
+
+                <div class="admin-table-shell">
+                    <table class="admin-table">
+                        <thead><tr><th>Boat name</th><th>Date rented</th><th>Time out</th><th>Time in</th><th>Duration</th><th>Passengers</th></tr></thead>
+                        <tbody id="historyTableBody"><tr><td colspan="6" class="empty-cell">Loading rental history…</td></tr></tbody>
+                    </table>
+                </div>
+                <div class="admin-footer"><span id="historyCount">0 rentals</span><span>Newest rentals first.</span></div>
+            </section>
+        </main>
+    </div>
+
+    <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+    <script type="module" src="./history.js"></script>
+</body>
+</html>

@@ -89,7 +89,11 @@ exports.telemetryIngest = async (req, res) => {
       device_id: boatId
     }, { merge: true });
 
-    await trackingRef.collection('history').add(pingPayload);
+    // GPS breadcrumbs are only retained while a boat is checked out to a renter.
+    const boatSnapshot = await trackingRef.get();
+    if (boatSnapshot.get('tracking_enabled') === true) {
+      await trackingRef.collection('history').add(pingPayload);
+    }
 
     return res.status(200).send('Telemetry parsed and updated successfully.');
   } catch (error) {

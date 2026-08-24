@@ -32,6 +32,8 @@
             <div class="flex items-center gap-2">
                 <div id="connectionStatus" class="connection-pill" role="status"><span class="status-dot"></span><span class="hidden sm:inline">Connecting</span></div>
                 <time id="headerClock" class="hidden font-mono text-xs text-zinc-400 md:block"></time>
+                <button id="signInButton" class="icon-button" type="button" title="Sign in for dock operations" aria-label="Sign in for dock operations"><i data-lucide="log-in" class="h-4 w-4"></i></button>
+                <a href="./history.html" class="icon-button" title="Rental history" aria-label="Rental history"><i data-lucide="history" class="h-4 w-4"></i></a>
                 <a href="./admin.html" class="icon-button" title="Fleet administration" aria-label="Fleet administration"><i data-lucide="settings" class="h-4 w-4"></i></a>
                 <button id="themeToggle" class="icon-button" type="button" title="Toggle color theme" aria-label="Toggle color theme"><i data-lucide="sun" class="h-4 w-4"></i></button>
                 <button id="fullscreenToggle" class="icon-button" type="button" title="Toggle fullscreen" aria-label="Toggle fullscreen"><i data-lucide="maximize" class="h-4 w-4"></i></button>
@@ -57,8 +59,8 @@
 
                 <div class="table-shell">
                     <table class="min-w-full border-separate border-spacing-0 text-left text-xs">
-                        <thead class="relative z-30"><tr><th>Vessel</th><th>Availability</th><th>Booked</th><th>Booked by</th><th>No. passengers</th><th>Time out</th><th>Due / ETA</th><th>Actual return</th><th>Coordinates</th><th>Mooring</th><th>Battery</th><th>Last update</th></tr></thead>
-                        <tbody id="fleetTableBody"><tr><td colspan="12" class="empty-cell">Waiting for fleet data…</td></tr></tbody>
+                        <thead class="relative z-30"><tr><th>Dock action</th><th>Vessel</th><th>Availability</th><th>Booked</th><th>Booked by</th><th>No. passengers</th><th>Time out</th><th>Due / ETA</th><th>Actual return</th><th>Coordinates</th><th>Mooring</th><th>Battery</th><th>Last update</th></tr></thead>
+                        <tbody id="fleetTableBody"><tr><td colspan="13" class="empty-cell">Waiting for fleet data…</td></tr></tbody>
                     </table>
                 </div>
 
@@ -83,6 +85,22 @@
 
         <footer class="status-bar"><span id="dataMode">Firebase live mode</span><span class="hidden sm:inline">Dock geofence: 55 m · Lake Union operating zone: 1.6 km</span><span id="lastRefresh" class="font-mono">No updates</span></footer>
     </div>
+    <div id="rentalBackdrop" class="modal-backdrop hidden"></div>
+    <div id="rentalModal" class="rental-modal hidden" role="dialog" aria-modal="true" aria-labelledby="rentalTitle">
+        <form id="rentalForm" class="rental-form">
+            <div class="rental-header">
+                <div><p class="eyebrow" id="rentalEyebrow">Dock operation</p><h2 id="rentalTitle">Check out</h2></div>
+                <button id="rentalClose" class="icon-button" type="button" title="Close" aria-label="Close"><i data-lucide="x" class="h-4 w-4"></i></button>
+            </div>
+            <div id="rentalBody" class="rental-body"></div>
+            <div id="rentalMessage" class="form-message hidden" role="alert"></div>
+            <div class="rental-actions">
+                <button id="rentalCancel" class="secondary-button" type="button">Cancel</button>
+                <button id="rentalConfirm" class="primary-button" type="submit"><span>Confirm</span></button>
+            </div>
+        </form>
+    </div>
+
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
     <script type="module" src="./dashboard.js"></script>

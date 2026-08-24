@@ -108,6 +108,36 @@ tbody tr.alert-row { box-shadow: inset 3px 0 #ef4444; }
 .leaflet-popup-content { font-family: "DM Sans", sans-serif; }
 .status-bar { height: var(--footer-height); flex: 0 0 var(--footer-height); padding: 0 10px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--border); background: var(--panel); color: var(--subtle); font-size: 10px; z-index: 1000; }
 
+.dock-action { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 92px; min-height: 27px; padding: 0 9px; border: 1px solid; border-radius: 4px; font-size: 10px; font-weight: 700; transition: background 140ms ease, border-color 140ms ease, color 140ms ease; }
+.dock-action.check-out { color: #38bdf8; border-color: rgb(56 189 248 / .45); background: rgb(56 189 248 / .1); }
+.dock-action.check-out:hover { color: #f0f9ff; background: #0284c7; border-color: #0284c7; }
+.dock-action.check-in { color: #4ade80; border-color: rgb(74 222 128 / .45); background: rgb(74 222 128 / .1); }
+.dock-action.check-in:hover { color: #f0fdf4; background: #16a34a; border-color: #16a34a; }
+.dock-action:disabled { cursor: not-allowed; color: var(--subtle); border-color: var(--border); background: transparent; }
+
+.primary-button, .secondary-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 34px; padding: 0 12px; border-radius: 4px; font-size: 11px; font-weight: 700; transition: background 150ms ease, border-color 150ms ease, color 150ms ease, opacity 150ms ease; }
+.secondary-button { border: 1px solid var(--border); background: var(--panel-raised); color: var(--muted); }
+.secondary-button:hover { border-color: var(--border-strong); color: var(--text); }
+.primary-button { border: 1px solid #0284c7; background: #0284c7; color: white; }
+.primary-button:hover { background: #0369a1; }
+.primary-button:disabled, .secondary-button:disabled { cursor: not-allowed; opacity: .45; }
+
+.modal-backdrop { position: fixed; inset: 0; z-index: 1900; background: rgb(0 0 0 / .6); backdrop-filter: blur(2px); }
+.rental-modal { position: fixed; z-index: 2000; top: 50%; left: 50%; width: min(430px, calc(100vw - 24px)); transform: translate(-50%, -50%); border: 1px solid var(--border); border-radius: 8px; background: var(--panel); box-shadow: 0 26px 60px rgb(0 0 0 / .5); }
+.rental-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 13px 15px; border-bottom: 1px solid var(--border); }
+.rental-header h2 { margin-top: 3px; font-size: 17px; font-weight: 700; }
+.rental-body { display: grid; gap: 11px; padding: 15px; }
+.rental-body label { display: grid; gap: 5px; color: var(--muted); font-size: 10px; font-weight: 700; }
+.rental-body input { width: 100%; height: 36px; padding: 0 9px; border: 1px solid var(--border); border-radius: 4px; outline: 0; background: var(--bg); color: var(--text); font: 12px "JetBrains Mono", monospace; }
+.rental-body input:focus { border-color: #0ea5e9; box-shadow: 0 0 0 2px rgb(14 165 233 / .12); }
+.privacy-note { display: flex; gap: 8px; padding: 10px; border: 1px solid rgb(56 189 248 / .3); border-radius: 5px; background: rgb(56 189 248 / .07); color: var(--muted); font-size: 11px; line-height: 1.5; }
+.privacy-note ul { margin: 5px 0 0; padding-left: 15px; list-style: disc; }
+.rental-summary { color: var(--text); font-size: 12px; }
+.rental-summary strong { font-weight: 700; }
+.form-message { margin: 0 15px; padding: 9px 10px; border: 1px solid rgb(248 113 113 / .4); border-radius: 4px; background: rgb(248 113 113 / .08); color: #fca5a5; font-size: 11px; }
+.form-message.success { border-color: rgb(74 222 128 / .4); background: rgb(74 222 128 / .08); color: #86efac; }
+.rental-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 13px 15px; border-top: 1px solid var(--border); }
+
 @media (max-width: 900px) {
     .workspace { flex-direction: column; }
     .operations-pane { width: 100% !important; min-width: 0; max-width: none; height: 55%; min-height: 190px; padding: 8px; }

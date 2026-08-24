@@ -15,38 +15,79 @@ service cloud.firestore {
         && request.resource.data.rental_schedule is map;
     }
 
+    function configurationKeys() {
+      return [
+        'device_id',
+        'vessel_name',
+        'availability_status',
+        'schedule_year',
+        'rental_season_start',
+        'rental_season_end',
+        'rental_schedule',
+        'configuration_updated_at'
+      ];
+    }
+
+    function rentalKeys() {
+      return [
+        'availability_status',
+        'tracking_enabled',
+        'booked',
+        'booked_by',
+        'passenger_count',
+        'time_out',
+        'actual_time_back',
+        'rental_updated_at'
+      ];
+    }
+
+    function validRentalState() {
+      return request.resource.data.availability_status in ['available', 'rented']
+        && request.resource.data.tracking_enabled is bool
+        && (!('booked_by' in request.resource.data) || request.resource.data.booked_by is string)
+        && (!('passenger_count' in request.resource.data) || request.resource.data.passenger_count is int)
+        // A boat that is not tracking must not retain renter identity.
+        && (request.resource.data.tracking_enabled == true
+            || !('booked_by' in request.resource.data));
+    }
+
     match /boats/{boatId} {
       allow read: if true;
       allow create: if isAdmin()
-        && request.resource.data.keys().hasOnly([
-          'device_id',
-          'vessel_name',
-          'availability_status',
-          'schedule_year',
-          'rental_season_start',
-          'rental_season_end',
-          'rental_schedule',
-          'configuration_updated_at'
-        ])
+        && request.resource.data.keys().hasOnly(configurationKeys())
         && validBoatConfiguration(boatId);
       allow update: if isAdmin()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'device_id',
-          'vessel_name',
-          'availability_status',
-          'schedule_year',
-          'rental_season_start',
-          'rental_season_end',
-          'rental_schedule',
-          'configuration_updated_at'
-        ])
-        && validBoatConfiguration(boatId);
+        && (
+          (request.resource.data.diff(resource.data).affectedKeys().hasOnly(configurationKeys())
+            && validBoatConfiguration(boatId))
+          || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(rentalKeys())
+            && validRentalState())
+        );
       allow delete: if false;
       
       match /history/{document} {
         allow read: if true;
-        allow write: if false;
+        allow create, update: if false;
+        // Staff erase the journey trail at check-in.
+        allow delete: if isAdmin();
       }
+    }
+
+    match /rental_history/{recordId} {
+      allow read: if true;
+      // Restricting keys keeps renter identity and coordinates out of the retained log.
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly([
+          'device_id',
+          'vessel_name',
+          'checked_out_at',
+          'checked_in_at',
+          'duration_minutes',
+          'passenger_count'
+        ])
+        && request.resource.data.vessel_name is string
+        && request.resource.data.duration_minutes is int;
+      allow update, delete: if false;
     }
   }
 }

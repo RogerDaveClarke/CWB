@@ -78,6 +78,7 @@ The variance classifier is gated by a 55 m circular geofence centered on the CWB
 *   `firmware/src/main.cpp`: SAMD21 firmware handling NEO-M9N positioning, RV-1805 wake timing, AMG8833 thermal sampling, LIS3DH window calculations, and **RadioLib LoRaWAN OTAA (US915)** 16-byte versioned packaging routines.
 *   `platforms/gcp/cloud-ingest/index.js`: Node.js webhook target configured for HTTP **GCP Cloud Function** triggers.
 *   `platforms/gcp/frontend/index.html`: Resizable operations dashboard with the fleet table, alerts, route history, and OpenStreetMap.
+*   `platforms/gcp/frontend/history.html`: Anonymised rental history log.
 *   `platforms/gcp/frontend/admin.html`: Administrative boat registry and annual weekly rental-schedule editor.
 *   `platforms/gcp/firestore.rules`: Firestore access rules for the GCP POC.
 *   `platforms/wix/backend/`: Wix Velo ingestion and retention jobs.
@@ -162,3 +163,19 @@ Open `platforms/gcp/frontend/admin.html` to configure boats. Each `boats/{DevEUI
 The editor defaults to a full calendar year with Monday closed and Tuesday through Sunday open from 12:30 PM to 6:30 PM. Existing Device IDs are locked in the editor because changing a DevEUI would break its telemetry and history association; create a new boat record when tracker hardware changes.
 
 With Firebase configured, administrators sign in using Google. Their Firebase Auth user must have the custom claim `admin: true`. Firestore rules permit these users to update only configuration fields. The Cloud Function continues to write telemetry through the Admin SDK, and browser clients cannot alter `last_ping` or history records.
+
+### 6. Check-Out, Check-In, and Data Retention
+
+Dock staff run rentals from the operations dashboard. Each row carries a toggle in the **Dock action** column.
+
+**Check out** captures the renter name and party size, sets `availability_status` to `rented`, and sets `tracking_enabled` to `true`. The ingest function appends a GPS breadcrumb to `boats/{DevEUI}/history` only while that flag is true, so idle boats never accumulate a location trail.
+
+**Check in** is the privacy boundary. In one operation the dashboard:
+
+1. Writes an anonymised record to `rental_history` containing only the device ID, boat name, check-out time, check-in time, duration, and passenger count.
+2. Deletes every document in `boats/{DevEUI}/history`, destroying the journey trail.
+3. Removes `booked_by`, `passenger_count`, and `time_out` from the boat document and sets `tracking_enabled` to `false`.
+
+Firestore rules restrict `rental_history` documents to that exact key set, so a renter name or coordinate cannot be written into the retained log even by mistake. The log is append-only: updates and deletes are denied.
+
+`platforms/gcp/frontend/history.html` presents this log with the boat name, date, times, duration, and party size. Once a rental is closed, no record links a customer to a route.
