@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-import { collection, doc, getFirestore, onSnapshot, serverTimestamp, setDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+import { collection, deleteDoc, doc, getDocs, getFirestore, onSnapshot, serverTimestamp, setDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 const firebaseConfig = {
     apiKey: "AIzaSyYourActualAPIKeyHere...",
@@ -31,10 +31,12 @@ const elements = {
     deviceId: document.getElementById("deviceId"),
     vesselName: document.getElementById("vesselName"),
     availability: document.getElementById("availability"),
+    reportIntervalMinutes: document.getElementById("reportIntervalMinutes"),
     scheduleYear: document.getElementById("scheduleYear"),
     seasonStart: document.getElementById("seasonStart"),
     seasonEnd: document.getElementById("seasonEnd"),
     weeklySchedule: document.getElementById("weeklySchedule"),
+    deleteButton: document.getElementById("deleteBoatButton"),
     saveButton: document.getElementById("saveButton")
 };
 
@@ -62,6 +64,8 @@ function normalizeBoat(id, raw = {}) {
         id,
         vesselName: raw.vessel_name || id,
         availability: raw.availability_status === "under_repair" || raw.availability_status === "maintenance" ? "under_repair" : "available",
+        activeRental: raw.tracking_enabled === true || raw.availability_status === "rented",
+        reportIntervalMinutes: Number(raw.report_interval_minutes ?? 3),
         scheduleYear: year,
         seasonStart: raw.rental_season_start || range.start,
         seasonEnd: raw.rental_season_end || range.end,
@@ -123,6 +127,7 @@ function renderTable() {
     elements.tableBody.innerHTML = boats.map(boat => `<tr>
         <td><span class="data-value">${escapeHtml(boat.id)}</span></td>
         <td><span class="vessel-name">${escapeHtml(boat.vesselName)}</span></td>
+        <td><span class="data-value">${boat.reportIntervalMinutes} min</span></td>
         <td><span class="data-value">${boat.scheduleYear}</span></td>
         <td><span class="data-value">${formatDate(boat.seasonStart)}</span><span class="cell-note">through ${formatDate(boat.seasonEnd)}</span></td>
         <td><span class="schedule-summary">${escapeHtml(summarizeSchedule(boat.schedule))}</span></td>
@@ -156,9 +161,11 @@ function openDrawer(boat = null) {
     elements.deviceId.disabled = Boolean(boat);
     elements.vesselName.value = boat?.vesselName || "";
     elements.availability.value = boat?.availability || "available";
+    elements.reportIntervalMinutes.value = boat?.reportIntervalMinutes || 3;
     elements.scheduleYear.value = year;
     elements.seasonStart.value = boat?.seasonStart || range.start;
     elements.seasonEnd.value = boat?.seasonEnd || range.end;
+    elements.deleteButton.classList.toggle("hidden", !boat);
     buildScheduleEditor(boat?.schedule || defaultSchedule());
     hideMessage();
     elements.backdrop.classList.remove("hidden");
@@ -185,6 +192,7 @@ function readSchedule() {
 function validateForm(config) {
     if (!/^[0-9a-f]{16}$/.test(config.id)) return "Device ID must contain exactly 16 hexadecimal characters.";
     if (!config.vesselName.trim()) return "Boat name is required.";
+    if (!Number.isInteger(config.reportIntervalMinutes) || config.reportIntervalMinutes < 1 || config.reportIntervalMinutes > 60) return "Reporting interval must be a whole number from 1 to 60 minutes.";
     if (!config.seasonStart || !config.seasonEnd || config.seasonStart > config.seasonEnd) return "Rental end date must be on or after the start date.";
     if (!config.seasonStart.startsWith(String(config.scheduleYear)) || !config.seasonEnd.startsWith(String(config.scheduleYear))) return "Rental dates must be within the selected schedule year.";
     const openDays = Object.entries(config.schedule).filter(([, window]) => window.enabled);
@@ -205,6 +213,7 @@ function configFromForm() {
         id: elements.deviceId.value.trim().toLowerCase(),
         vesselName: elements.vesselName.value.trim(),
         availability: elements.availability.value,
+        reportIntervalMinutes: Number(elements.reportIntervalMinutes.value),
         scheduleYear: Number(elements.scheduleYear.value),
         seasonStart: elements.seasonStart.value,
         seasonEnd: elements.seasonEnd.value,
@@ -217,6 +226,7 @@ async function saveBoat(config) {
         device_id: config.id,
         vessel_name: config.vesselName,
         availability_status: config.availability,
+        report_interval_minutes: config.reportIntervalMinutes,
         schedule_year: config.scheduleYear,
         rental_season_start: config.seasonStart,
         rental_season_end: config.seasonEnd,
@@ -232,10 +242,41 @@ async function saveBoat(config) {
     await setDoc(doc(state.db, "boats", config.id), { ...payload, configuration_updated_at: serverTimestamp() }, { merge: true });
 }
 
+async function deleteBoat() {
+    const boat = state.boats.get(state.editingId);
+    if (!boat) return;
+    if (boat.activeRental) { showMessage("Check in this boat before deleting it."); return; }
+    if (!window.confirm(`Delete ${boat.vesselName}? This permanently deletes its configuration, latest telemetry, and any GPS history. Completed rental history is retained.`)) return;
+
+    elements.deleteButton.disabled = true;
+    elements.saveButton.disabled = true;
+    elements.deleteButton.querySelector("span").textContent = "Deleting…";
+    try {
+        if (state.demoMode) {
+            state.boats.delete(boat.id);
+            localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify([...state.boats.values()]));
+            renderTable();
+        } else {
+            if (!state.user || !state.isAdmin) throw new Error("Sign in with a Firebase account that has the admin custom claim.");
+            const history = await getDocs(collection(state.db, "boats", boat.id, "history"));
+            await Promise.all(history.docs.map(entry => deleteDoc(entry.ref)));
+            await deleteDoc(doc(state.db, "boats", boat.id));
+        }
+        closeDrawer();
+    } catch (error) {
+        console.error("Unable to delete boat", error);
+        showMessage(error.message || "Unable to delete boat.");
+    } finally {
+        elements.deleteButton.disabled = false;
+        elements.saveButton.disabled = false;
+        elements.deleteButton.querySelector("span").textContent = "Delete boat";
+    }
+}
+
 function restoreDemoBoats() {
     try {
         const saved = JSON.parse(localStorage.getItem(DEMO_STORAGE_KEY) || "null");
-        if (Array.isArray(saved) && saved.length) return saved.map(boat => normalizeBoat(boat.id, { vessel_name: boat.vesselName, availability_status: boat.availability, schedule_year: boat.scheduleYear, rental_season_start: boat.seasonStart, rental_season_end: boat.seasonEnd, rental_schedule: boat.schedule }));
+        if (Array.isArray(saved)) return saved.map(boat => normalizeBoat(boat.id, { vessel_name: boat.vesselName, availability_status: boat.availability, report_interval_minutes: boat.reportIntervalMinutes, schedule_year: boat.scheduleYear, rental_season_start: boat.seasonStart, rental_season_end: boat.seasonEnd, rental_schedule: boat.schedule }));
     } catch (error) { console.warn("Ignoring invalid saved demo configuration", error); }
     return makeDemoBoats();
 }
@@ -280,7 +321,7 @@ function startFirebase() {
     }, error => {
         console.error("Unable to load boat configuration", error);
         setConnection("error", "Load failed");
-        elements.tableBody.innerHTML = `<tr><td colspan="7" class="empty-cell">Unable to load boat configuration.</td></tr>`;
+        elements.tableBody.innerHTML = `<tr><td colspan="8" class="empty-cell">Unable to load boat configuration.</td></tr>`;
     });
 }
 
@@ -289,6 +330,7 @@ function setupControls() {
     elements.yearFilter.addEventListener("change", event => { state.year = Number(event.target.value); renderTable(); });
     elements.search.addEventListener("input", event => { state.search = event.target.value.trim().toLowerCase(); renderTable(); });
     document.getElementById("addBoatButton").addEventListener("click", () => openDrawer());
+    elements.deleteButton.addEventListener("click", deleteBoat);
     document.getElementById("closeDrawerButton").addEventListener("click", closeDrawer);
     document.getElementById("cancelButton").addEventListener("click", closeDrawer);
     elements.backdrop.addEventListener("click", closeDrawer);

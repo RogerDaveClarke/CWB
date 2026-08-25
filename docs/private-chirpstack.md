@@ -100,6 +100,27 @@ Create the device using the firmware `devEui`. Configure the same `joinEui`, `ap
 
 After flashing, verify a successful join and an uplink on FPort 1. The application payload is already decoded by the GCP or Wix adapter; a ChirpStack codec is not required.
 
+## Configure the Reporting Interval
+
+The tracker reports every 3 minutes by default. It accepts an unconfirmed
+Class A downlink on FPort 2 containing exactly one unsigned byte. The byte is
+the interval in minutes; valid values are 1 through 60.
+
+In the ChirpStack device queue, enqueue the command for the matching DevEUI. It
+will be delivered in the receive windows following the device's next uplink.
+For example:
+
+| Interval | Hex payload | Base64 payload |
+| :--- | :--- | :--- |
+| 3 minutes | `03` | `Aw==` |
+| 15 minutes | `0F` | `Dw==` |
+| 60 minutes | `3C` | `PA==` |
+
+The GCP admin page stores `report_interval_minutes` as the intended value for
+each boat. Saving that record does not enqueue a ChirpStack command because the
+private ChirpStack server is not reachable from Firebase Hosting. Queue the
+matching FPort 2 command from the CWB LAN after changing the admin value.
+
 ## Configure the HTTP Integration
 
 Configure ChirpStack's HTTP integration to use JSON. ChirpStack appends an `event` query parameter and sends uplinks as `event=up`. The adapters accept the ChirpStack v4 fields:

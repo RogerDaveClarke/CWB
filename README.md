@@ -1,6 +1,16 @@
 ## Problem Statement
 The Center for Wooden Boats in Seattle offers free 1 hour rows on two specific row boats. It is first come first served. When a customer takes out a boat, the customer details are logged in a paper tracker with the time out and when they return the time in. Sometimes people forget to do the logging. When customers arrive and there are no boats available they have to wait until a boat returns. Sometimes the previous users are late and the livery volunteers to watch for this and get a rescue boat to go out and tow them in. This slows downs the operation. Additionally, next year, the CWB will introduce a digital system allowing pre-booking. The ideal behind this project is to place a tracker on each row boat that will provide frequent pings LoRa transmissions wiht the boat's ID and GPS coordinates. The webfront consumin this data will show when each boat when out, how long its been out there and if its going to be late based on the current vector so that alerts can be sent.
 
+## Dashboard & Mapping
+Operations Dashboard
+![alt text](image.png)
+
+Boat Administration
+![alt text](image-1.png)
+
+Rental History
+![alt text](image-2.png)
+
 
 ## Marine Fleet Telemetry & Mooring Detection System
 
@@ -72,13 +82,15 @@ The variance classifier is gated by a 55 m circular geofence centered on the CWB
 *   **Tied Up at Dock ($\\sigma^2 < 0.025\\text{g}^2$)**: A vessel tethered to fixed docks or heavy mooring slips exhibits clean, low-energy, bounded structural harmonic oscillations. Wave impacts are heavily damped by dock lines and protective bumper friction, compressing variance firmly below the trigger threshold.
 *   **Underway / In Use ($\\sigma^2 \\ge 0.025\\text{g}^2$)**: Active oars impacting rowlocks, internal footsteps, or open-water waves throwing an unconstrained hull profile produce transient, high-energy acceleration shocks across multiple axes. This erratic movement increases statistical variance past the baseline limit, flagging an active status.
 
+
+
 ---
 
 ## 📦 System File Registry
 *   `firmware/src/main.cpp`: SAMD21 firmware handling NEO-M9N positioning, RV-1805 wake timing, AMG8833 thermal sampling, LIS3DH window calculations, and **RadioLib LoRaWAN OTAA (US915)** 16-byte versioned packaging routines.
 *   `platforms/gcp/cloud-ingest/index.js`: Node.js webhook target configured for HTTP **GCP Cloud Function** triggers.
-*   `platforms/gcp/frontend/index.html`: Resizable operations dashboard with the fleet table, alerts, route history, and OpenStreetMap.
-*   `platforms/gcp/frontend/history.html`: Anonymised rental history log.
+*   `platforms/gcp/frontend/index.html`: Resizable operations dashboard with a sortable, user-configurable fleet table, alerts, last positions, and an overdue-only three-point trail and direction arrow on OpenStreetMap. Column order, visibility, and sorting persist in the browser.
+*   `platforms/gcp/frontend/history.html`: Pseudonymous rental history log.
 *   `platforms/gcp/frontend/admin.html`: Administrative boat registry and annual weekly rental-schedule editor.
 *   `platforms/gcp/firestore.rules`: Firestore access rules for the GCP POC.
 *   `platforms/wix/backend/`: Wix Velo ingestion and retention jobs.
@@ -132,24 +144,139 @@ The GCP adapter stores the version as `protocol_version`. The Wix adapter stores
 * Open `platforms/gcp/frontend/index.html` and replace the `firebaseConfig` object dictionary elements with your web target data properties from your Firebase Console.
 * Serve the static index bundle live using Firebase Hosting or your preferred hosting architecture.
 
-### 4. Dashboard Rental Fields
+### 4. Complete Data Model
 
-The ingestion function owns `device_id` and `last_ping`. It uses a merge write, so front-desk or booking integration metadata can coexist on each `boats/{DevEUI}` document:
+The DevEUI is the common identifier across ChirpStack, Firestore, and Wix. Field
+names use `snake_case` in GCP and `camelCase` in Wix.
 
-| Field | Type | Purpose |
+#### 4.1 LoRaWAN application messages
+
+Uplinks use FPort 1 and the 16-byte telemetry protocol documented above.
+Reporting-interval commands use FPort 2 with exactly one unsigned byte: the
+number of minutes from 1 through 60. The firmware defaults to 3 minutes and
+ignores other ports, malformed payloads, and out-of-range values.
+
+ChirpStack sends the GCP or Wix adapter an uplink event shaped as:
+
+```json
+{
+  "deviceInfo": { "devEui": "70b3d57ed0000001" },
+  "fPort": 1,
+  "data": "BASE64_ENCODED_16_BYTE_PAYLOAD"
+}
+```
+
+#### 4.2 Firestore `boats/{DevEUI}`
+
+Each boat document combines configuration, active-rental state, and its latest
+telemetry. The ingest function merge-writes `device_id` and `last_ping`, so it
+does not overwrite configuration or rental fields.
+
+| Field | Type | Required / lifecycle | Purpose |
+| :--- | :--- | :--- | :--- |
+| `device_id` | String | Required | Exact 16-character DevEUI and document ID |
+| `vessel_name` | String | Required | Human-readable boat name |
+| `availability_status` | String enum | Required | `available`, `rented`, or `under_repair`; only `available` and `rented` boats appear on the operations dashboard |
+| `report_interval_minutes` | Integer | Required, 1-60 | Desired tracker reporting cadence; saving it does not itself queue a ChirpStack downlink |
+| `schedule_year` | Integer | Required | Calendar year governed by the schedule |
+| `rental_season_start` | String | Required, `YYYY-MM-DD` | First rentable date in `schedule_year` |
+| `rental_season_end` | String | Required, `YYYY-MM-DD` | Last rentable date in `schedule_year` |
+| `rental_schedule` | Map | Required | Weekly schedule described below |
+| `configuration_updated_at` | Timestamp | Set on admin save | Last configuration write |
+| `tracking_enabled` | Boolean | Active-rental state | Server-side gate controlling breadcrumb creation |
+| `booked` | Boolean | Active-rental state | Whether the boat has an active booking/rental |
+| `booked_by` | String | Present only during rental | Renter name; deleted at check-in |
+| `passenger_count` | Integer | Present only during rental, 1-6 | Party size; removed from the boat at check-in |
+| `time_out` | Timestamp | Present only during rental | Check-out time; deleted at check-in |
+| `actual_time_back` | Timestamp | Optional transient field | Explicit return time when supplied; cleared by the current lifecycle |
+| `rental_updated_at` | Timestamp | Set on check-out/check-in | Last rental-state transition |
+| `last_ping` | Map | Set by ingest | Latest decoded telemetry, described below |
+
+`rental_schedule` contains all seven lowercase weekday keys. Each value has the
+same shape:
+
+```json
+{
+  "monday": { "enabled": false, "start": "12:30", "end": "18:30" },
+  "tuesday": { "enabled": true, "start": "12:30", "end": "18:30" },
+  "wednesday": { "enabled": true, "start": "12:30", "end": "18:30" },
+  "thursday": { "enabled": true, "start": "12:30", "end": "18:30" },
+  "friday": { "enabled": true, "start": "12:30", "end": "18:30" },
+  "saturday": { "enabled": true, "start": "12:30", "end": "18:30" },
+  "sunday": { "enabled": true, "start": "12:30", "end": "18:30" }
+}
+```
+
+The dashboard also understands optional `rental_type` (`fixed` or `open`),
+`rental_minutes` (default 60), and `time_due_back` (Timestamp) fields for a
+future trusted booking integration. Current browser security rules do not
+allow those optional fields to be written.
+
+#### 4.3 `last_ping` and `boats/{DevEUI}/history/{autoId}`
+
+`last_ping` has this decoded telemetry shape. While `tracking_enabled` is true,
+the ingest function appends the same shape to the boat's `history`
+subcollection.
+
+| Field | Type | Meaning |
 | :--- | :--- | :--- |
-| `vessel_name` | String | Human-readable boat name mapped to the DevEUI |
-| `availability_status` | String | `available`, `rented`, or `maintenance` |
-| `booked` | Boolean | Whether the boat has an active reservation |
-| `booked_by` | String | Customer name associated with the reservation |
-| `passenger_count` | Number | Number of passengers assigned to the rental, from 1 through 6 |
-| `rental_type` | String | `fixed` or `open` |
-| `rental_minutes` | Number | Fixed rental duration; defaults to 60 |
-| `time_out` | Timestamp | Checkout time |
-| `time_due_back` | Timestamp | Optional explicit due time |
-| `actual_time_back` | Timestamp | Recorded return time |
+| `protocol_version` | Integer | Telemetry protocol version; currently `1` |
+| `latitude` | Number | Decimal degrees |
+| `longitude` | Number | Decimal degrees |
+| `battery_mv` | Integer | Battery voltage in millivolts |
+| `low_battery` | Boolean | Firmware low-battery flag |
+| `gps_fix` | Boolean | Valid 3D GPS fix flag |
+| `inside_dock_geofence` | Boolean | Compatibility alias for valid dock-geofence classification |
+| `mooring_classification_valid` | Boolean | Whether mooring classification was evaluated inside the firmware geofence |
+| `mooring_status` | String enum | `Unknown`, `Outside Dock Geofence`, `Tied Up at Dock`, or `Underway at Dock` |
+| `variance_g2` | Number or null | Motion variance in g squared; null when classification was not run |
+| `max_temperature_c` | Number or null | Maximum valid AMG8833 pixel temperature in Celsius |
+| `timestamp` | Timestamp | Server receive time |
 
-For fixed rentals, the dashboard uses `time_due_back` or calculates `time_out + rental_minutes`. For open rentals, it estimates return time from the last three GPS observations only when the vessel is moving toward the dock. Missing booking fields display as unavailable rather than being inferred from telemetry.
+History is rental-scoped precise-location data. The dashboard reads only the
+latest three points for an overdue rental to draw its short trail and derive a
+direction arrow. Speed, bearing, estimated return time, overdue state, battery
+percentage, and operating-zone alerts are derived in the browser and are not
+stored fields.
+
+#### 4.4 Firestore `rental_history/{autoId}`
+
+Check-in writes one append-only retained record, then deletes the boat's GPS
+history and active renter fields.
+
+| Field | Type | Meaning |
+| :--- | :--- | :--- |
+| `device_id` | String | Boat DevEUI |
+| `vessel_name` | String | Boat name at check-in |
+| `checked_out_at` | Timestamp | Rental start |
+| `checked_in_at` | Timestamp | Rental end |
+| `duration_minutes` | Integer | Rounded elapsed rental duration |
+| `passenger_count` | Integer | Party size |
+
+The retained record contains no renter name or coordinates. Because the DevEUI
+and exact times remain, it is pseudonymous, not anonymous.
+
+#### 4.5 Wix `VesselTelemetry`
+
+The phase-2 Wix adapter stores one row per uplink rather than the merged
+Firestore boat model.
+
+| Field | Wix type | Meaning |
+| :--- | :--- | :--- |
+| `title` | Text | Boat DevEUI |
+| `protocolVersion` | Number | Telemetry protocol version |
+| `latitude`, `longitude` | Number | Decimal-degree GPS position |
+| `batteryMv` | Number | Battery voltage in millivolts |
+| `variance` | Number or null | Motion variance when classification is valid |
+| `statusString` | Text | Mooring status |
+| `lowBattery`, `gpsFix` | Boolean | Battery and GPS flags |
+| `insideDockGeofence` | Boolean | Compatibility alias for valid classification |
+| `mooringClassificationValid` | Boolean | Whether dock mooring was evaluated |
+| `maxTemperatureC` | Number or null | Maximum valid thermal pixel temperature |
+| `timestamp` | Date and Time | Adapter receive time |
+
+The scheduled Wix cleanup removes `VesselTelemetry` rows older than 30 days in
+batches of up to 1,000.
 
 ### 5. Fleet Administration
 
@@ -159,8 +286,14 @@ Open `platforms/gcp/frontend/admin.html` to configure boats. Each `boats/{DevEUI
 * Schedule year and active start/end dates.
 * Enabled state plus rental start/end time for every day of the week.
 * Availability as `Yes` (`available`) or `Under Repair` (`under_repair`).
+* Reporting interval target from 1 through 60 minutes.
 
 The editor defaults to a full calendar year with Monday closed and Tuesday through Sunday open from 12:30 PM to 6:30 PM. Existing Device IDs are locked in the editor because changing a DevEUI would break its telemetry and history association; create a new boat record when tracker hardware changes.
+
+The **Delete boat** action is available only when editing an existing boat. It
+requires confirmation and is blocked while `tracking_enabled` is true. Deletion
+removes the boat configuration, latest telemetry, and GPS-history subcollection;
+completed pseudonymous records in `rental_history` are retained.
 
 With Firebase configured, administrators sign in using Google. Their Firebase Auth user must have the custom claim `admin: true`. Firestore rules permit these users to update only configuration fields. The Cloud Function continues to write telemetry through the Admin SDK, and browser clients cannot alter `last_ping` or history records.
 
@@ -172,7 +305,7 @@ Dock staff run rentals from the operations dashboard. Each row carries a toggle 
 
 **Check in** is the privacy boundary. In one operation the dashboard:
 
-1. Writes an anonymised record to `rental_history` containing only the device ID, boat name, check-out time, check-in time, duration, and passenger count.
+1. Writes a pseudonymous record to `rental_history` containing only the device ID, boat name, check-out time, check-in time, duration, and passenger count.
 2. Deletes every document in `boats/{DevEUI}/history`, destroying the journey trail.
 3. Removes `booked_by`, `passenger_count`, and `time_out` from the boat document and sets `tracking_enabled` to `false`.
 

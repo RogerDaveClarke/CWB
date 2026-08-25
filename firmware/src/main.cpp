@@ -210,8 +210,25 @@ void loop() {
         dataPacket.flags |= 0x01; // Set Bit 0: Low Battery
     }
     
-    // 5. LoRaWAN Uplink
-    node.sendReceive((uint8_t*)&dataPacket, sizeof(Payload), 1);
+    // 5. LoRaWAN uplink and optional one-byte report interval downlink on FPort 2.
+    uint8_t downlinkPayload[1] = { 0 };
+    size_t downlinkSize = sizeof(downlinkPayload);
+    LoRaWANEvent_t downlinkDetails;
+    int16_t radioState = node.sendReceive(
+        (uint8_t*)&dataPacket,
+        sizeof(Payload),
+        1,
+        downlinkPayload,
+        &downlinkSize,
+        false,
+        nullptr,
+        &downlinkDetails
+    );
+    if (radioState == RADIOLIB_ERR_NONE
+        && downlinkDetails.fPort == CONFIG_DOWNLINK_PORT
+        && downlinkSize == 1) {
+        apply_report_interval(downlinkPayload[0]);
+    }
     
     enter_deep_sleep();
 }

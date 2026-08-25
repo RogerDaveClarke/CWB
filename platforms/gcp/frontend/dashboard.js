@@ -17,9 +17,40 @@ const OPERATING_ZONE_METERS = 1600;
 const STALE_AFTER_MINUTES = 30;
 const DEFAULT_RENTAL_MINUTES = 60;
 const DEMO_RENTAL_HISTORY_KEY = "cwbDemoRentalHistory";
-const state = { boats: new Map(), histories: new Map(), markers: new Map(), selectedId: null, routeLayer: null, historyUnsubscribe: null, search: "", status: "all", demoMode: false, db: null, auth: null, user: null, isStaff: false, pendingAction: null };
+const TABLE_PREFERENCES_KEY = "cwbFleetTablePreferences";
+const COLUMN_DEFINITIONS = [
+    { id: "action", label: "Dock action", required: true },
+    { id: "vessel", label: "Vessel" },
+    { id: "availability", label: "Availability" },
+    { id: "booked", label: "Booked" },
+    { id: "bookedBy", label: "Booked by" },
+    { id: "passengers", label: "No. passengers" },
+    { id: "timeOut", label: "Time out" },
+    { id: "due", label: "Due / ETA" },
+    { id: "actualReturn", label: "Actual return" },
+    { id: "coordinates", label: "Coordinates" },
+    { id: "mooring", label: "Mooring" },
+    { id: "battery", label: "Battery" },
+    { id: "lastUpdate", label: "Last update" }
+];
+const DEFAULT_COLUMN_ORDER = COLUMN_DEFINITIONS.map(column => column.id);
+
+function loadTablePreferences() {
+    try {
+        const saved = JSON.parse(localStorage.getItem(TABLE_PREFERENCES_KEY) || "null");
+        const savedOrder = Array.isArray(saved?.order) ? saved.order.filter(id => DEFAULT_COLUMN_ORDER.includes(id)) : [];
+        const order = [...savedOrder, ...DEFAULT_COLUMN_ORDER.filter(id => !savedOrder.includes(id))];
+        const hidden = new Set(Array.isArray(saved?.hidden) ? saved.hidden.filter(id => id !== "action" && DEFAULT_COLUMN_ORDER.includes(id)) : []);
+        const sortColumn = DEFAULT_COLUMN_ORDER.includes(saved?.sort?.column) ? saved.sort.column : "vessel";
+        const sortDirection = saved?.sort?.direction === "desc" ? "desc" : "asc";
+        return { order, hidden, sort: { column: sortColumn, direction: sortDirection } };
+    } catch { return { order: [...DEFAULT_COLUMN_ORDER], hidden: new Set(), sort: { column: "vessel", direction: "asc" } }; }
+}
+
+const tablePreferences = loadTablePreferences();
+const state = { boats: new Map(), histories: new Map(), markers: new Map(), selectedId: null, routeLayer: null, historyUnsubscribes: new Map(), search: "", status: "all", columnOrder: tablePreferences.order, hiddenColumns: tablePreferences.hidden, sort: tablePreferences.sort, demoMode: false, db: null, auth: null, user: null, isStaff: false, pendingAction: null };
 const elements = {
-    operationsPane: document.getElementById("operationsPane"), splitter: document.getElementById("splitter"), tableBody: document.getElementById("fleetTableBody"), alertsList: document.getElementById("alertsList"), alertCount: document.getElementById("alertCount"), connection: document.getElementById("connectionStatus"), dataMode: document.getElementById("dataMode"), lastRefresh: document.getElementById("lastRefresh"), mapDetail: document.getElementById("mapDetail"), search: document.getElementById("searchInput"), statusFilter: document.getElementById("statusFilter"),
+    operationsPane: document.getElementById("operationsPane"), splitter: document.getElementById("splitter"), tableHead: document.getElementById("fleetTableHead"), tableBody: document.getElementById("fleetTableBody"), columnMenuButton: document.getElementById("columnMenuButton"), columnMenu: document.getElementById("columnMenu"), columnMenuList: document.getElementById("columnMenuList"), alertsList: document.getElementById("alertsList"), alertCount: document.getElementById("alertCount"), connection: document.getElementById("connectionStatus"), dataMode: document.getElementById("dataMode"), lastRefresh: document.getElementById("lastRefresh"), mapDetail: document.getElementById("mapDetail"), search: document.getElementById("searchInput"), statusFilter: document.getElementById("statusFilter"),
     signIn: document.getElementById("signInButton"), rentalModal: document.getElementById("rentalModal"), rentalBackdrop: document.getElementById("rentalBackdrop"), rentalBody: document.getElementById("rentalBody"), rentalMessage: document.getElementById("rentalMessage"), rentalConfirm: document.getElementById("rentalConfirm"), rentalForm: document.getElementById("rentalForm"),
     metrics: { total: document.getElementById("metricTotal"), available: document.getElementById("metricAvailable"), underway: document.getElementById("metricUnderway"), alerts: document.getElementById("metricAlerts") }
 };
@@ -28,11 +59,9 @@ const standardTiles = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y
 const darkTiles = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", { maxZoom: 20, attribution: "&copy; OpenStreetMap contributors &copy; CARTO" });
 const map = L.map("map", { zoomControl: true, layers: [darkTiles] }).setView([47.6322, -122.3367], 14);
 L.control.layers({ "Dark OSM": darkTiles, "Standard OSM": standardTiles }, null, { position: "topright" }).addTo(map);
-L.circle([DOCK.latitude, DOCK.longitude], { radius: DOCK_GEOFENCE_METERS, color: "#38bdf8", weight: 2, fillColor: "#38bdf8", fillOpacity: .12 }).bindTooltip("CWB dock geofence").addTo(map);
-L.circle([DOCK.latitude, DOCK.longitude], { radius: OPERATING_ZONE_METERS, color: "#f59e0b", weight: 1, dashArray: "7 8", fillOpacity: .015 }).bindTooltip("Lake Union operating zone").addTo(map);
 
 function toDate(value) { if (!value) return null; if (value instanceof Date) return value; if (typeof value.toDate === "function") return value.toDate(); if (typeof value.seconds === "number") return new Date(value.seconds * 1000); const parsed = new Date(value); return Number.isNaN(parsed.getTime()) ? null : parsed; }
-function formatTime(value, includeDate = false) { const date = toDate(value); if (!date) return "—"; return new Intl.DateTimeFormat("en-US", { weekday: includeDate ? "short" : undefined, month: includeDate ? "short" : undefined, day: includeDate ? "numeric" : undefined, hour: "numeric", minute: "2-digit" }).format(date); }
+function formatTime(value, includeDate = false) { const date = toDate(value); if (!date) return "—"; return new Intl.DateTimeFormat("en-US", { year: includeDate ? "numeric" : undefined, month: includeDate ? "2-digit" : undefined, day: includeDate ? "2-digit" : undefined, hour: "numeric", minute: "2-digit" }).format(date); }
 function escapeHtml(value) { return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;"); }
 function haversineMeters(a, b) { const radius = 6371000; const radians = degrees => degrees * Math.PI / 180; const latDelta = radians(b.latitude - a.latitude); const lonDelta = radians(b.longitude - a.longitude); const lat1 = radians(a.latitude); const lat2 = radians(b.latitude); const value = Math.sin(latDelta / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(lonDelta / 2) ** 2; return 2 * radius * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value)); }
 function batteryPercent(millivolts) { return Math.round(Math.max(0, Math.min(100, ((millivolts - 4200) / 1400) * 100))); }
@@ -46,8 +75,34 @@ function normalizedBoat(id, raw) {
 }
 
 function fixedDue(boat) { if (boat.explicitDue) return boat.explicitDue; if (boat.rentalType === "fixed" && boat.timeOut) return new Date(boat.timeOut.getTime() + boat.rentalMinutes * 60000); return null; }
+function isRentalOverdue(boat) { const due = fixedDue(boat); return Boolean(due && !boat.actualReturn && due < new Date()); }
+function recentHistoryPoints(boatId) { return (state.histories.get(boatId) || []).filter(point => point.timestamp && Number.isFinite(point.latitude) && Number.isFinite(point.longitude)).slice(-3); }
+function movementBearing(boat) {
+    if (!isRentalOverdue(boat)) return null;
+    const points = recentHistoryPoints(boat.id);
+    if (points.length < 3) return null;
+    const radians = degrees => degrees * Math.PI / 180;
+    let north = 0;
+    let east = 0;
+    let distanceTravelled = 0;
+    for (let index = 1; index < points.length; index += 1) {
+        const start = points[index - 1];
+        const end = points[index];
+        const latitude1 = radians(start.latitude);
+        const latitude2 = radians(end.latitude);
+        const longitudeDelta = radians(end.longitude - start.longitude);
+        const bearing = Math.atan2(Math.sin(longitudeDelta) * Math.cos(latitude2), Math.cos(latitude1) * Math.sin(latitude2) - Math.sin(latitude1) * Math.cos(latitude2) * Math.cos(longitudeDelta));
+        const distance = haversineMeters(start, end);
+        const weight = distance * index;
+        north += Math.cos(bearing) * weight;
+        east += Math.sin(bearing) * weight;
+        distanceTravelled += distance;
+    }
+    if (distanceTravelled < 3 || (north === 0 && east === 0)) return null;
+    return (Math.atan2(east, north) * 180 / Math.PI + 360) % 360;
+}
 function vectorEstimate(boat) {
-    const points = (state.histories.get(boat.id) || []).filter(point => point.timestamp && Number.isFinite(point.latitude) && Number.isFinite(point.longitude)).slice(-3);
+    const points = recentHistoryPoints(boat.id);
     if (points.length < 2) return null;
     let distanceTravelled = 0;
     for (let index = 1; index < points.length; index += 1) distanceTravelled += haversineMeters(points[index - 1], points[index]);
@@ -62,12 +117,12 @@ function vectorEstimate(boat) {
 }
 
 function isOutsideZone(boat) { return Number.isFinite(boat.latitude) && Number.isFinite(boat.longitude) && haversineMeters(boat, DOCK) > OPERATING_ZONE_METERS; }
-function operationalState(boat) { const due = fixedDue(boat); const overdue = Boolean(due && !boat.actualReturn && due < new Date()); if (boat.availability === "maintenance") return "maintenance"; if (overdue || boat.lowBattery || isOutsideZone(boat)) return "overdue"; if (boat.availability === "available" || (boat.mooring === "Tied Up at Dock" && !boat.timeOut)) return "available"; return "rented"; }
+function operationalState(boat) { if (boat.availability === "maintenance") return "maintenance"; if (isRentalOverdue(boat) || boat.lowBattery || isOutsideZone(boat)) return "overdue"; if (boat.availability === "available" || (boat.mooring === "Tied Up at Dock" && !boat.timeOut)) return "available"; return "rented"; }
 function dueDisplay(boat) { if (boat.actualReturn || ["available", "maintenance"].includes(boat.availability)) return { primary: "—", secondary: "No active rental", warning: false }; const due = fixedDue(boat); if (due) { const deltaMinutes = Math.round((Date.now() - due.getTime()) / 60000); return { primary: formatTime(due, true), secondary: deltaMinutes > 0 && !boat.actualReturn ? `+${deltaMinutes} min late` : `${boat.rentalMinutes} min rental`, warning: deltaMinutes > 0 && !boat.actualReturn }; } const estimate = vectorEstimate(boat); if (estimate) return { primary: formatTime(estimate.due, true), secondary: `Vector ETA · ${estimate.minutes.toFixed(0)} min`, warning: false }; return { primary: "Calculating…", secondary: "Needs return vector", warning: false }; }
 function alertsFor(boat) { const alerts = []; const due = fixedDue(boat); if (due && !boat.actualReturn && due < new Date()) alerts.push({ critical: true, message: `${boat.name} is ${Math.max(1, Math.round((Date.now() - due) / 60000))} minutes overdue.` }); if (boat.lowBattery || (boat.batteryMv && boat.batteryMv <= 4200)) alerts.push({ critical: true, message: `${boat.name} battery is low at ${(boat.batteryMv / 1000).toFixed(2)} V.` }); if (isOutsideZone(boat)) alerts.push({ critical: true, message: `${boat.name} is outside the Lake Union operating zone.` }); if (!boat.gpsFix) alerts.push({ critical: false, message: `${boat.name} does not have a valid GPS fix.` }); if (boat.timestamp && Date.now() - boat.timestamp.getTime() > STALE_AFTER_MINUTES * 60000) alerts.push({ critical: false, message: `${boat.name} telemetry is stale (${formatTime(boat.timestamp)}).` }); return alerts; }
 
 function formatVariance(boat) { return boat.mooringValid && boat.variance != null ? `σ² ${boat.variance.toFixed(5)}` : "Not evaluated"; }
-function markerIcon(boat) { const status = operationalState(boat); const critical = alertsFor(boat).some(alert => alert.critical); const markerStatus = critical ? "warning" : status; return L.divIcon({ className: "", html: `<div class="boat-marker ${markerStatus}"><i data-lucide="ship-wheel"></i><span class="boat-label">${escapeHtml(boat.name)}</span></div>`, iconSize: [38, 38], iconAnchor: [19, 19] }); }
+function markerIcon(boat) { const status = operationalState(boat); const critical = alertsFor(boat).some(alert => alert.critical); const markerStatus = critical ? "warning" : status; const bearing = movementBearing(boat); const directionArrow = bearing == null ? "" : `<span class="boat-direction" style="--boat-bearing:${bearing.toFixed(1)}deg" title="Direction of travel"><i data-lucide="navigation-2"></i></span>`; return L.divIcon({ className: "", html: `<div class="boat-marker ${markerStatus}">${directionArrow}<i data-lucide="ship-wheel"></i><span class="boat-label">${escapeHtml(boat.name)}</span></div>`, iconSize: [38, 38], iconAnchor: [19, 19] }); }
 function updateMarkers() {
     const currentIds = new Set(state.boats.keys());
     state.markers.forEach((marker, id) => { if (!currentIds.has(id)) { marker.remove(); state.markers.delete(id); } });
@@ -81,31 +136,151 @@ function updateMarkers() {
 }
 
 function badge(status, label) { return `<span class="badge ${status}"><i class="badge-dot"></i>${escapeHtml(label)}</span>`; }
-function dockActionCell(boat, status) {
-    if (status === "maintenance") return `<td><button class="dock-action" type="button" disabled>Unavailable</button></td>`;
+function dockActionContent(boat, status) {
+    if (status === "maintenance") return `<button class="dock-action" type="button" disabled>Unavailable</button>`;
     const isOut = status === "rented" || status === "overdue";
-    return `<td><button class="dock-action ${isOut ? "check-in" : "check-out"}" type="button" data-action="${isOut ? "check-in" : "check-out"}" data-boat-id="${escapeHtml(boat.id)}"><i data-lucide="${isOut ? "log-in" : "log-out"}" class="h-3 w-3"></i>${isOut ? "Check in" : "Check out"}</button></td>`;
+    return `<button class="dock-action ${isOut ? "check-in" : "check-out"}" type="button" data-action="${isOut ? "check-in" : "check-out"}" data-boat-id="${escapeHtml(boat.id)}"><i data-lucide="${isOut ? "log-in" : "log-out"}" class="h-3 w-3"></i>${isOut ? "Check in" : "Check out"}</button>`;
+}
+function visibleColumns() { return state.columnOrder.filter(id => !state.hiddenColumns.has(id)).map(id => COLUMN_DEFINITIONS.find(column => column.id === id)); }
+function saveTablePreferences() { localStorage.setItem(TABLE_PREFERENCES_KEY, JSON.stringify({ order: state.columnOrder, hidden: [...state.hiddenColumns], sort: state.sort })); }
+function sortValue(boat, columnId) {
+    const status = operationalState(boat);
+    const due = fixedDue(boat) || vectorEstimate(boat)?.due;
+    const values = {
+        action: status,
+        vessel: `${boat.name} ${boat.id}`.toLowerCase(),
+        availability: status,
+        booked: boat.booked ? 1 : 0,
+        bookedBy: boat.bookedBy.toLowerCase(),
+        passengers: boat.passengerCount,
+        timeOut: boat.timeOut?.getTime() ?? 0,
+        due: due?.getTime() ?? 0,
+        actualReturn: boat.actualReturn?.getTime() ?? 0,
+        coordinates: Number.isFinite(boat.latitude) ? boat.latitude : Number.NEGATIVE_INFINITY,
+        mooring: boat.mooring.toLowerCase(),
+        battery: boat.batteryMv,
+        lastUpdate: boat.timestamp?.getTime() ?? 0
+    };
+    return values[columnId];
+}
+function compareBoats(left, right) {
+    const leftValue = sortValue(left, state.sort.column);
+    const rightValue = sortValue(right, state.sort.column);
+    const result = typeof leftValue === "number" && typeof rightValue === "number"
+        ? leftValue - rightValue
+        : String(leftValue).localeCompare(String(rightValue), undefined, { numeric: true, sensitivity: "base" });
+    return (state.sort.direction === "asc" ? result : -result) || left.name.localeCompare(right.name);
+}
+function cellContent(columnId, boat, status, due, battery, availabilityLabel) {
+    const cells = {
+        action: () => dockActionContent(boat, status),
+        vessel: () => `<span class="vessel-name">${escapeHtml(boat.name)}</span><span class="vessel-id">${escapeHtml(boat.id)}</span>`,
+        availability: () => badge(status, availabilityLabel),
+        booked: () => `<span class="data-value">${boat.booked ? "YES" : "NO"}</span>`,
+        bookedBy: () => `<span class="data-value">${boat.bookedBy ? escapeHtml(boat.bookedBy) : "—"}</span>`,
+        passengers: () => `<span class="data-value">${boat.passengerCount || "—"}</span>`,
+        timeOut: () => `<span class="data-value">${formatTime(boat.timeOut, true)}</span><span class="cell-note">${boat.timeOut ? boat.rentalType : "No active checkout"}</span>`,
+        due: () => `<span class="data-value ${due.warning ? "text-red-400" : ""}">${due.primary}</span><span class="cell-note ${due.warning ? "text-red-400" : ""}">${due.secondary}</span>`,
+        actualReturn: () => `<span class="data-value">${formatTime(boat.actualReturn, true)}</span>`,
+        coordinates: () => `<span class="data-value">${Number.isFinite(boat.latitude) ? boat.latitude.toFixed(5) : "—"}</span><span class="cell-note font-mono">${Number.isFinite(boat.longitude) ? boat.longitude.toFixed(5) : "—"}</span>`,
+        mooring: () => `<span class="data-value">${escapeHtml(boat.mooring.replace("Underway / Moving", "Underway").replace(" at Dock", ""))}</span>`,
+        battery: () => `<span class="data-value ${boat.lowBattery ? "text-red-400" : ""}">${(boat.batteryMv / 1000).toFixed(2)} V</span><div class="battery-track"><div class="battery-fill ${boat.lowBattery ? "low" : ""}" style="width:${battery}%"></div></div>`,
+        lastUpdate: () => `<span class="data-value">${formatTime(boat.timestamp)}</span><span class="cell-note">Protocol v${boat.protocolVersion ?? "—"}</span>`
+    };
+    return cells[columnId]();
+}
+function renderTableHead(columns) {
+    elements.tableHead.innerHTML = columns.map(column => {
+        const active = state.sort.column === column.id;
+        const direction = active ? state.sort.direction : "none";
+        const icon = active ? (direction === "asc" ? "arrow-up" : "arrow-down") : "chevrons-up-down";
+        return `<th aria-sort="${active ? (direction === "asc" ? "ascending" : "descending") : "none"}"><button class="column-sort" type="button" data-column-id="${column.id}"><span>${escapeHtml(column.label)}</span><i data-lucide="${icon}"></i></button></th>`;
+    }).join("");
+    elements.tableHead.querySelectorAll(".column-sort").forEach(button => button.addEventListener("click", () => {
+        const column = button.dataset.columnId;
+        state.sort = { column, direction: state.sort.column === column && state.sort.direction === "asc" ? "desc" : "asc" };
+        saveTablePreferences();
+        renderTable();
+    }));
+}
+function renderColumnMenu() {
+    elements.columnMenuList.innerHTML = state.columnOrder.map((id, index) => {
+        const column = COLUMN_DEFINITIONS.find(item => item.id === id);
+        const checked = !state.hiddenColumns.has(id);
+        return `<div class="column-menu-row" data-column-id="${id}">
+            <label class="column-toggle"><input type="checkbox" ${checked ? "checked" : ""} ${column.required ? "disabled" : ""}><span>${escapeHtml(column.label)}</span></label>
+            <button class="column-move" type="button" data-direction="up" title="Move ${escapeHtml(column.label)} left" aria-label="Move ${escapeHtml(column.label)} left" ${index === 0 ? "disabled" : ""}><i data-lucide="arrow-up"></i></button>
+            <button class="column-move" type="button" data-direction="down" title="Move ${escapeHtml(column.label)} right" aria-label="Move ${escapeHtml(column.label)} right" ${index === state.columnOrder.length - 1 ? "disabled" : ""}><i data-lucide="arrow-down"></i></button>
+        </div>`;
+    }).join("");
+    elements.columnMenuList.querySelectorAll(".column-toggle input").forEach(input => input.addEventListener("change", event => {
+        const id = event.target.closest(".column-menu-row").dataset.columnId;
+        if (event.target.checked) state.hiddenColumns.delete(id); else state.hiddenColumns.add(id);
+        saveTablePreferences();
+        renderTable();
+    }));
+    elements.columnMenuList.querySelectorAll(".column-move").forEach(button => button.addEventListener("click", () => {
+        const id = button.closest(".column-menu-row").dataset.columnId;
+        const index = state.columnOrder.indexOf(id);
+        const targetIndex = index + (button.dataset.direction === "up" ? -1 : 1);
+        if (targetIndex < 0 || targetIndex >= state.columnOrder.length) return;
+        [state.columnOrder[index], state.columnOrder[targetIndex]] = [state.columnOrder[targetIndex], state.columnOrder[index]];
+        saveTablePreferences();
+        renderColumnMenu();
+        renderTable();
+    }));
+    lucide.createIcons();
+}
+function setColumnMenuOpen(open) {
+    elements.columnMenu.classList.toggle("hidden", !open);
+    elements.columnMenuButton.setAttribute("aria-expanded", String(open));
+    if (open) renderColumnMenu();
 }
 function renderTable() {
-    const boats = [...state.boats.values()].filter(boat => `${boat.id} ${boat.name}`.toLowerCase().includes(state.search) && (state.status === "all" || operationalState(boat) === state.status));
-    if (!boats.length) { elements.tableBody.innerHTML = `<tr><td colspan="13" class="empty-cell">No vessels match the current filters.</td></tr>`; return; }
+    const columns = visibleColumns();
+    renderTableHead(columns);
+    const boats = [...state.boats.values()].filter(boat => `${boat.id} ${boat.name}`.toLowerCase().includes(state.search) && (state.status === "all" || operationalState(boat) === state.status)).sort(compareBoats);
+    if (!boats.length) { elements.tableBody.innerHTML = `<tr><td colspan="${columns.length}" class="empty-cell">No vessels match the current filters.</td></tr>`; lucide.createIcons(); return; }
     elements.tableBody.innerHTML = boats.map(boat => {
         const status = operationalState(boat); const due = dueDisplay(boat); const battery = batteryPercent(boat.batteryMv); const hasAlerts = alertsFor(boat).length > 0; const availabilityLabel = status === "overdue" ? "Overdue" : status[0].toUpperCase() + status.slice(1);
-        return `<tr data-boat-id="${escapeHtml(boat.id)}" class="${hasAlerts ? "alert-row" : ""} ${state.selectedId === boat.id ? "selected" : ""}">${dockActionCell(boat, status)}<td><span class="vessel-name">${escapeHtml(boat.name)}</span><span class="vessel-id">${escapeHtml(boat.id)}</span></td><td>${badge(status, availabilityLabel)}</td><td><span class="data-value">${boat.booked ? "YES" : "NO"}</span></td><td><span class="data-value">${boat.bookedBy ? escapeHtml(boat.bookedBy) : "—"}</span></td><td><span class="data-value">${boat.passengerCount || "—"}</span></td><td><span class="data-value">${formatTime(boat.timeOut, true)}</span><span class="cell-note">${boat.timeOut ? boat.rentalType : "No active checkout"}</span></td><td><span class="data-value ${due.warning ? "text-red-400" : ""}">${due.primary}</span><span class="cell-note ${due.warning ? "text-red-400" : ""}">${due.secondary}</span></td><td><span class="data-value">${formatTime(boat.actualReturn, true)}</span></td><td><span class="data-value">${Number.isFinite(boat.latitude) ? boat.latitude.toFixed(5) : "—"}</span><span class="cell-note font-mono">${Number.isFinite(boat.longitude) ? boat.longitude.toFixed(5) : "—"}</span></td><td><span class="data-value">${escapeHtml(boat.mooring.replace(" at Dock", ""))}</span><span class="cell-note">${formatVariance(boat)}</span></td><td><span class="data-value ${boat.lowBattery ? "text-red-400" : ""}">${(boat.batteryMv / 1000).toFixed(2)} V</span><div class="battery-track"><div class="battery-fill ${boat.lowBattery ? "low" : ""}" style="width:${battery}%"></div></div></td><td><span class="data-value">${formatTime(boat.timestamp)}</span><span class="cell-note">Protocol v${boat.protocolVersion ?? "—"}</span></td></tr>`;
+        return `<tr data-boat-id="${escapeHtml(boat.id)}" class="${hasAlerts ? "alert-row" : ""} ${state.selectedId === boat.id ? "selected" : ""}">${columns.map(column => `<td>${cellContent(column.id, boat, status, due, battery, availabilityLabel)}</td>`).join("")}</tr>`;
     }).join("");
     elements.tableBody.querySelectorAll("tr[data-boat-id]").forEach(row => row.addEventListener("click", () => selectBoat(row.dataset.boatId, true)));
-    elements.tableBody.querySelectorAll(".dock-action[data-action]").forEach(button => button.addEventListener("click", event => { event.stopPropagation(); openRentalModal(button.dataset.boatId, button.dataset.action); }));
+    elements.tableBody.querySelectorAll(".dock-action[data-action]").forEach(button => button.addEventListener("click", event => {
+        event.stopPropagation();
+        if (button.dataset.action === "check-in") checkInFromTable(button.dataset.boatId, button);
+        else openRentalModal(button.dataset.boatId);
+    }));
     lucide.createIcons();
 }
 
 function renderAlerts() { const alerts = [...state.boats.values()].flatMap(boat => alertsFor(boat).map(alert => ({ ...alert, boatId: boat.id }))); elements.alertCount.textContent = alerts.length; elements.metrics.alerts.textContent = alerts.length; elements.alertsList.innerHTML = alerts.length ? alerts.map(alert => `<button class="alert-item ${alert.critical ? "critical" : ""}" data-boat-id="${escapeHtml(alert.boatId)}" type="button"><span class="alert-severity"></span><span>${escapeHtml(alert.message)}</span></button>`).join("") : `<p class="no-alerts">No active fleet alerts.</p>`; elements.alertsList.querySelectorAll("button").forEach(button => button.addEventListener("click", () => selectBoat(button.dataset.boatId, true))); }
 function renderMetrics() { const boats = [...state.boats.values()]; elements.metrics.total.textContent = boats.length; elements.metrics.available.textContent = boats.filter(boat => operationalState(boat) === "available").length; elements.metrics.underway.textContent = boats.filter(boat => boat.mooring !== "Tied Up at Dock").length; }
 function renderMapDetail() { const boat = state.boats.get(state.selectedId); if (!boat) { elements.mapDetail.classList.add("hidden"); return; } const due = dueDisplay(boat); elements.mapDetail.innerHTML = `<div class="flex items-start justify-between gap-3"><div><p class="eyebrow">Selected vessel</p><h3 class="mt-1 font-semibold">${escapeHtml(boat.name)}</h3><p class="mt-1 font-mono text-[10px] text-zinc-500">${escapeHtml(boat.id)}</p></div>${badge(operationalState(boat), operationalState(boat).toUpperCase())}</div><div class="map-detail-grid"><div><span>Due / ETA</span><strong>${due.primary}</strong></div><div><span>Battery</span><strong>${(boat.batteryMv / 1000).toFixed(2)} V</strong></div><div><span>Last ping</span><strong>${formatTime(boat.timestamp)}</strong></div></div>`; elements.mapDetail.classList.remove("hidden"); }
-function drawRoute(id) { if (state.routeLayer) state.routeLayer.remove(); const points = (state.histories.get(id) || []).filter(point => Number.isFinite(point.latitude) && Number.isFinite(point.longitude)); if (points.length < 2) return; state.routeLayer = L.polyline(points.map(point => [point.latitude, point.longitude]), { color: operationalState(state.boats.get(id)) === "overdue" ? "#ef4444" : "#38bdf8", weight: 3, opacity: .75, dashArray: "4 7" }).addTo(map); }
-function selectBoat(id, pan) { state.selectedId = id; const boat = state.boats.get(id); if (!boat) return; renderTable(); renderMapDetail(); drawRoute(id); if (pan && boat.gpsFix) map.flyTo([boat.latitude, boat.longitude], Math.max(map.getZoom(), 15), { duration: .7 }); if (!state.demoMode) subscribeToHistory(id); }
-function subscribeToHistory(id) { if (state.historyUnsubscribe) { state.historyUnsubscribe(); state.historyUnsubscribe = null; } const boat = state.boats.get(id); if (!state.db || !boat?.trackingEnabled) return; const historyQuery = query(collection(state.db, "boats", id, "history"), orderBy("timestamp", "desc"), limit(120)); state.historyUnsubscribe = onSnapshot(historyQuery, snapshot => { state.histories.set(id, snapshot.docs.map(document => { const data = document.data(); return { latitude: Number(data.latitude), longitude: Number(data.longitude), timestamp: toDate(data.timestamp) }; }).reverse()); drawRoute(id); renderTable(); renderMapDetail(); }, error => console.warn("Unable to load route history", error)); }
+function drawRoute(id) { if (state.routeLayer) { state.routeLayer.remove(); state.routeLayer = null; } const boat = state.boats.get(id); if (!boat || !isRentalOverdue(boat)) return; const points = recentHistoryPoints(id); if (points.length < 2) return; state.routeLayer = L.polyline(points.map(point => [point.latitude, point.longitude]), { color: "#ef4444", weight: 3, opacity: .75, dashArray: "4 7" }).addTo(map); }
+function selectBoat(id, pan) { state.selectedId = id; const boat = state.boats.get(id); if (!boat) return; renderTable(); renderMapDetail(); drawRoute(id); if (pan && boat.gpsFix) map.flyTo([boat.latitude, boat.longitude], Math.max(map.getZoom(), 15), { duration: .7 }); }
+function syncHistorySubscriptions() {
+    if (!state.db) return;
+    const overdueIds = new Set([...state.boats.values()].filter(boat => boat.trackingEnabled && isRentalOverdue(boat)).map(boat => boat.id));
+    state.historyUnsubscribes.forEach((unsubscribe, id) => {
+        if (overdueIds.has(id)) return;
+        unsubscribe();
+        state.historyUnsubscribes.delete(id);
+        state.histories.delete(id);
+    });
+    overdueIds.forEach(id => {
+        if (state.historyUnsubscribes.has(id)) return;
+        const historyQuery = query(collection(state.db, "boats", id, "history"), orderBy("timestamp", "desc"), limit(3));
+        const unsubscribe = onSnapshot(historyQuery, snapshot => {
+            state.histories.set(id, snapshot.docs.map(document => { const data = document.data(); return { latitude: Number(data.latitude), longitude: Number(data.longitude), timestamp: toDate(data.timestamp) }; }).reverse());
+            updateMarkers();
+            if (state.selectedId === id) drawRoute(id);
+        }, error => console.warn(`Unable to load route history for ${id}`, error));
+        state.historyUnsubscribes.set(id, unsubscribe);
+    });
+}
 function render() { renderMetrics(); renderTable(); renderAlerts(); updateMarkers(); renderMapDetail(); elements.lastRefresh.textContent = `Updated ${formatTime(new Date())}`; }
-function addLivePoint(boat) { if (!boat.trackingEnabled || !boat.timestamp || !boat.gpsFix) return; const history = state.histories.get(boat.id) || []; const last = history.at(-1); if (!last || last.timestamp?.getTime() !== boat.timestamp.getTime()) { history.push({ latitude: boat.latitude, longitude: boat.longitude, timestamp: boat.timestamp }); state.histories.set(boat.id, history.slice(-120)); } }
+function addLivePoint(boat) { if (!boat.trackingEnabled || !boat.timestamp || !boat.gpsFix) return; const history = state.histories.get(boat.id) || []; const last = history.at(-1); if (!last || last.timestamp?.getTime() !== boat.timestamp.getTime()) { history.push({ latitude: boat.latitude, longitude: boat.longitude, timestamp: boat.timestamp }); state.histories.set(boat.id, history.slice(-3)); } }
 function setConnection(mode, label) { elements.connection.className = `connection-pill ${mode}`; elements.connection.innerHTML = `<span class="status-dot"></span><span class="hidden sm:inline">${escapeHtml(label)}</span>`; }
 
 function readDemoRentalHistory() { try { return JSON.parse(localStorage.getItem(DEMO_RENTAL_HISTORY_KEY) || "[]"); } catch { return []; } }
@@ -155,7 +330,8 @@ async function checkInBoat(boat) {
 
     await addDoc(collection(state.db, "rental_history"), record);
 
-    if (state.historyUnsubscribe) { state.historyUnsubscribe(); state.historyUnsubscribe = null; }
+    const historyUnsubscribe = state.historyUnsubscribes.get(boat.id);
+    if (historyUnsubscribe) { historyUnsubscribe(); state.historyUnsubscribes.delete(boat.id); }
     const trail = await getDocs(collection(state.db, "boats", boat.id, "history"));
     await Promise.all(trail.docs.map(entry => deleteDoc(entry.ref)));
 
@@ -171,23 +347,38 @@ async function checkInBoat(boat) {
     });
 }
 
+async function checkInFromTable(boatId, button) {
+    const boat = state.boats.get(boatId);
+    if (!boat) return;
+    if (!state.demoMode && !state.isStaff) { setConnection("error", "Sign in required"); return; }
+
+    button.disabled = true;
+    button.textContent = "Checking in…";
+    try {
+        await checkInBoat(boat);
+        render();
+        if (!state.demoMode) setConnection("live", "Boat checked in");
+    } catch (error) {
+        console.error("Check-in failed", error);
+        setConnection("error", "Check-in failed");
+        if (button.isConnected) { button.disabled = false; button.textContent = "Check in"; }
+    }
+}
+
 function showRentalMessage(message, success = false) { elements.rentalMessage.textContent = message; elements.rentalMessage.className = `form-message ${success ? "success" : ""}`; }
 function hideRentalMessage() { elements.rentalMessage.className = "form-message hidden"; elements.rentalMessage.textContent = ""; }
 
-function openRentalModal(boatId, action) {
+function openRentalModal(boatId) {
     const boat = state.boats.get(boatId);
     if (!boat) return;
-    state.pendingAction = { boatId, action };
+     state.pendingAction = { boatId };
     hideRentalMessage();
-    document.getElementById("rentalTitle").textContent = action === "check-out" ? `Check out ${boat.name}` : `Check in ${boat.name}`;
-    document.getElementById("rentalEyebrow").textContent = action === "check-out" ? "Start rental" : "End rental";
-    elements.rentalConfirm.querySelector("span").textContent = action === "check-out" ? "Check out" : "Check in and erase data";
-    elements.rentalBody.innerHTML = action === "check-out"
-        ? `<label><span>Renter name</span><input id="renterName" type="text" maxlength="60" placeholder="Full name" autocomplete="off" required></label>
-           <label><span>Number of passengers</span><input id="renterPassengers" type="number" min="1" max="6" value="2" required></label>
-           <div class="privacy-note"><i data-lucide="shield" class="h-4 w-4 shrink-0"></i><span>Location tracking starts now and runs only until check-in. The renter name and route are erased when the boat returns.</span></div>`
-        : `<p class="rental-summary">Out since <strong>${formatTime(boat.timeOut, true)}</strong>${boat.bookedBy ? ` · <strong>${escapeHtml(boat.bookedBy)}</strong>` : ""}</p>
-           <div class="privacy-note"><i data-lucide="shield-check" class="h-4 w-4 shrink-0"></i><span>Checking in permanently deletes:<ul><li>every GPS coordinate from this trip</li><li>the renter name and passenger count</li></ul>Only the boat name and rental times are kept.</span></div>`;
+     document.getElementById("rentalTitle").textContent = `Check out ${boat.name}`;
+     document.getElementById("rentalEyebrow").textContent = "Start rental";
+     elements.rentalConfirm.querySelector("span").textContent = "Check out";
+     elements.rentalBody.innerHTML = `<label><span>Renter name</span><input id="renterName" type="text" maxlength="60" placeholder="Full name" autocomplete="off" required></label>
+         <label><span>Number of passengers</span><input id="renterPassengers" type="number" min="1" max="6" value="2" required></label>
+         <div class="privacy-note"><i data-lucide="shield" class="h-4 w-4 shrink-0"></i><span>Location tracking starts now and runs only until check-in. The renter name and route are erased automatically when the boat returns.</span></div>`;
     elements.rentalBackdrop.classList.remove("hidden");
     elements.rentalModal.classList.remove("hidden");
     lucide.createIcons();
@@ -199,27 +390,22 @@ function closeRentalModal() { state.pendingAction = null; elements.rentalBackdro
 async function submitRentalAction(event) {
     event.preventDefault();
     if (!state.pendingAction) return;
-    const { boatId, action } = state.pendingAction;
+    const { boatId } = state.pendingAction;
     const boat = state.boats.get(boatId);
     if (!boat) { closeRentalModal(); return; }
     if (!state.demoMode && !state.isStaff) { showRentalMessage("Sign in with a dock staff account to record rentals."); return; }
 
-    let renterName = "";
-    let passengerCount = 0;
-    if (action === "check-out") {
-        renterName = document.getElementById("renterName").value.trim();
-        passengerCount = Number(document.getElementById("renterPassengers").value);
-        if (!renterName) { showRentalMessage("Renter name is required."); return; }
-        if (!Number.isInteger(passengerCount) || passengerCount < 1 || passengerCount > 6) { showRentalMessage("Passengers must be between 1 and 6."); return; }
-    }
+    const renterName = document.getElementById("renterName").value.trim();
+    const passengerCount = Number(document.getElementById("renterPassengers").value);
+    if (!renterName) { showRentalMessage("Renter name is required."); return; }
+    if (!Number.isInteger(passengerCount) || passengerCount < 1 || passengerCount > 6) { showRentalMessage("Passengers must be between 1 and 6."); return; }
 
     elements.rentalConfirm.disabled = true;
     try {
-        if (action === "check-out") await checkOutBoat(boat, renterName, passengerCount);
-        else await checkInBoat(boat);
+        await checkOutBoat(boat, renterName, passengerCount);
         render();
         if (state.demoMode) closeRentalModal();
-        else { showRentalMessage(action === "check-out" ? "Boat checked out." : "Boat checked in and rental data erased.", true); setTimeout(closeRentalModal, 600); }
+        else { showRentalMessage("Boat checked out.", true); setTimeout(closeRentalModal, 600); }
     } catch (error) {
         console.error("Rental action failed", error);
         showRentalMessage(error.message || "Unable to complete the dock operation.");
@@ -242,7 +428,7 @@ function startFirebase() {
             elements.signIn.title = user ? `Sign out ${user.displayName || user.email || ""}`.trim() : "Sign in for dock operations";
             lucide.createIcons();
         });
-        onSnapshot(collection(db, "boats"), snapshot => { const next = new Map(); snapshot.forEach(document => { const boat = normalizedBoat(document.id, document.data()); next.set(boat.id, boat); addLivePoint(boat); }); state.boats = next; if (!state.selectedId && next.size) state.selectedId = next.keys().next().value; setConnection("live", "Firebase live"); render(); }, error => { console.error("Firestore listener failed", error); setConnection("error", "Connection error"); elements.tableBody.innerHTML = `<tr><td colspan="13" class="empty-cell">Unable to load Firebase telemetry. Check the console and Firestore configuration.</td></tr>`; });
+        onSnapshot(collection(db, "boats"), snapshot => { const next = new Map(); snapshot.forEach(document => { const boat = normalizedBoat(document.id, document.data()); if (boat.availability === "maintenance") return; next.set(boat.id, boat); addLivePoint(boat); }); state.boats = next; if (!next.has(state.selectedId)) state.selectedId = next.size ? next.keys().next().value : null; syncHistorySubscriptions(); setConnection("live", "Firebase live"); render(); }, error => { console.error("Firestore listener failed", error); setConnection("error", "Connection error"); elements.tableBody.innerHTML = `<tr><td colspan="${visibleColumns().length}" class="empty-cell">Unable to load Firebase telemetry. Check the console and Firestore configuration.</td></tr>`; });
     } catch (error) { console.error("Firebase initialization failed", error); setConnection("error", "Configuration error"); }
 }
 
@@ -263,7 +449,7 @@ function startDemo() {
         normalizedBoat("70b3d57ed0000009", { vessel_name: "Rowboat Gas Works", availability_status: "rented", booked: true, booked_by: "Marcus Lee", passenger_count: randomPassengerCount(), rental_type: "open", time_out: demoOperatingDate(tuesday, 5, 13, 0), last_ping: { protocol_version: 1, latitude: 47.6346, longitude: -122.3328, battery_mv: 4680, low_battery: false, gps_fix: true, mooring_status: "Underway / Moving", variance_g2: .0017, max_temperature_c: 19.4, timestamp: new Date(now.getTime() - 8000) } }),
         normalizedBoat("70b3d57ed0000010", { vessel_name: "Rowboat Aurora", availability_status: "rented", booked: true, booked_by: "Taylor Brooks", passenger_count: randomPassengerCount(), rental_type: "fixed", rental_minutes: 60, time_out: demoOperatingDate(tuesday, 5, 17, 30), last_ping: { protocol_version: 1, latitude: 47.6402, longitude: -122.3344, battery_mv: 4520, low_battery: false, gps_fix: true, mooring_status: "Underway / Moving", variance_g2: .0028, max_temperature_c: 19.2, timestamp: new Date(now.getTime() - 11000) } })
     ];
-    state.boats = new Map(boats.map(boat => [boat.id, boat])); state.histories.set(boats[8].id, demoHistory({ latitude: 47.6405, longitude: -122.3340 }, boats[8], 18, demoOperatingDate(tuesday, 5, 13, 0))); state.histories.set(boats[9].id, demoHistory(DOCK, boats[9], 24, demoOperatingDate(tuesday, 5, 17, 30))); state.selectedId = boats[8].id; elements.dataMode.textContent = "Demo mode · Tue–Sun, 12:30–18:30"; elements.signIn.disabled = true; elements.signIn.title = "Demo mode"; setConnection("live", "Demo data"); render(); selectBoat(boats[8].id, false);
+    state.boats = new Map(boats.filter(boat => boat.availability !== "maintenance").map(boat => [boat.id, boat])); state.histories.set(boats[8].id, demoHistory({ latitude: 47.6405, longitude: -122.3340 }, boats[8], 18, demoOperatingDate(tuesday, 5, 13, 0))); state.histories.set(boats[9].id, demoHistory(DOCK, boats[9], 24, demoOperatingDate(tuesday, 5, 17, 30))); state.selectedId = boats[8].id; elements.dataMode.textContent = "Demo mode · Tue–Sun, 12:30–18:30"; elements.signIn.classList.add("hidden"); setConnection("live", "Demo data"); render(); selectBoat(boats[8].id, false);
 }
 
 function setupInteractions() {
@@ -271,7 +457,10 @@ function setupInteractions() {
     document.getElementById("rentalClose").addEventListener("click", closeRentalModal);
     document.getElementById("rentalCancel").addEventListener("click", closeRentalModal);
     elements.rentalBackdrop.addEventListener("click", closeRentalModal);
-    document.addEventListener("keydown", event => { if (event.key === "Escape" && !elements.rentalModal.classList.contains("hidden")) closeRentalModal(); });
+    document.addEventListener("keydown", event => { if (event.key !== "Escape") return; if (!elements.rentalModal.classList.contains("hidden")) closeRentalModal(); setColumnMenuOpen(false); });
+    document.addEventListener("click", event => { if (!event.target.closest(".column-menu-wrap")) setColumnMenuOpen(false); });
+    elements.columnMenuButton.addEventListener("click", event => { event.stopPropagation(); setColumnMenuOpen(elements.columnMenu.classList.contains("hidden")); });
+    document.getElementById("resetColumnsButton").addEventListener("click", () => { state.columnOrder = [...DEFAULT_COLUMN_ORDER]; state.hiddenColumns.clear(); state.sort = { column: "vessel", direction: "asc" }; saveTablePreferences(); renderColumnMenu(); renderTable(); });
     elements.signIn.addEventListener("click", async () => {
         if (state.demoMode || !state.auth) return;
         try { if (state.user) await signOut(state.auth); else await signInWithPopup(state.auth, new GoogleAuthProvider()); }

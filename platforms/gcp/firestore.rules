@@ -9,6 +9,9 @@ service cloud.firestore {
       return request.resource.data.device_id == boatId
         && request.resource.data.vessel_name is string
         && request.resource.data.availability_status in ['available', 'under_repair']
+        && request.resource.data.report_interval_minutes is int
+        && request.resource.data.report_interval_minutes >= 1
+        && request.resource.data.report_interval_minutes <= 60
         && request.resource.data.schedule_year is int
         && request.resource.data.rental_season_start is string
         && request.resource.data.rental_season_end is string
@@ -20,6 +23,7 @@ service cloud.firestore {
         'device_id',
         'vessel_name',
         'availability_status',
+        'report_interval_minutes',
         'schedule_year',
         'rental_season_start',
         'rental_season_end',
@@ -63,7 +67,9 @@ service cloud.firestore {
           || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(rentalKeys())
             && validRentalState())
         );
-      allow delete: if false;
+      allow delete: if isAdmin()
+        && (!('tracking_enabled' in resource.data)
+        || resource.data.tracking_enabled == false);
       
       match /history/{document} {
         allow read: if true;

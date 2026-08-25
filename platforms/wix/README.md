@@ -13,7 +13,7 @@ To eliminate errors introduced by random structural placement inside boat hulls,
 $$ |a| = \\sqrt{a_x^2 + a_y^2 + a_z^2} $$
 
 ### 2. High-Frequency Time Windows
-The SAMD21 microprocessor executes a wake phase every 15 minutes, fires up the accelerometer bus channel to **10Hz**, and records sequential observations for a $3$-second capture timeline interval ($N = 30$ data snapshots):
+The SAMD21 microprocessor executes a wake phase every 3 minutes by default, fires up the accelerometer bus channel to **10Hz**, and records sequential observations for a $3$-second capture timeline interval ($N = 30$ data snapshots). A one-byte LoRaWAN downlink on FPort 2 can set the interval from 1–60 minutes:
 $$ \\mu = \\frac{1}{N} \\sum_{i=1}^{N} |a|_i $$
 
 ### 3. Energy Variance Classifications

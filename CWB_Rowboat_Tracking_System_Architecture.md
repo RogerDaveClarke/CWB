@@ -73,7 +73,8 @@ graph TD
 
 ## 3. End-to-end data flow
 
-1. The tracker wakes every 15 minutes on an external RTC alarm.
+1. The tracker wakes every 3 minutes by default on an external RTC alarm. A
+   validated LoRaWAN downlink can configure a 1–60 minute interval.
 2. It acquires a 3D GPS fix, conditionally samples motion, and reads battery and
    thermal values.
 3. It transmits a packed 16-byte LoRaWAN uplink on FPort 1 and returns to deep
@@ -122,10 +123,14 @@ Single canonical source: `firmware/src/main.cpp`, built with PlatformIO for
 
 ### 5.1 Wake cycle
 
-The RV-1805 countdown timer drives a 15-minute cycle. On wake the firmware
+The RV-1805 countdown timer drives a 3-minute cycle by default. On wake the firmware
 enables the sensor rail, acquires GPS, samples conditionally, transmits, and
 re-enters `standby`. The accelerometer is returned to `POWERDOWN` and the radio
 to `sleep` before the MCU sleeps.
+
+After each FPort 1 uplink, the Class A receive windows accept an optional
+one-byte downlink on FPort 2. Values from 1 through 60 reprogram the interval in
+minutes; malformed payloads, other ports, and out-of-range values are ignored.
 
 ### 5.2 Mooring detection and the dock geofence
 
@@ -198,8 +203,8 @@ static frontend is three vanilla-JS pages served by Firebase Hosting:
 
 | Page | Purpose |
 | :--- | :--- |
-| `index.html` | Operations dashboard: fleet table, alerts, Leaflet/OpenStreetMap, resizable split |
-| `admin.html` | Boat registry, annual weekly rental schedules, availability |
+| `index.html` | Operations dashboard: fleet table, alerts, last position, and an overdue-only three-point trail with direction arrow |
+| `admin.html` | Boat registry, reporting interval target, annual weekly rental schedules, availability |
 | `history.html` | Completed-rental log |
 
 ### Phase 2 — Wix
@@ -220,6 +225,7 @@ GCP live during Wix validation, then retire it.
 boats/{DevEUI}
 ├── device_id, vessel_name
 ├── availability_status            available | rented | under_repair
+├── report_interval_minutes         desired tracker cadence, 1–60
 ├── schedule_year, rental_season_start, rental_season_end, rental_schedule
 ├── tracking_enabled               gates breadcrumb retention
 ├── booked, booked_by, passenger_count, time_out, actual_time_back

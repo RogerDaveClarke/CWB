@@ -26,7 +26,7 @@
                 <div class="hidden h-7 w-px bg-zinc-700 sm:block"></div>
                 <div class="min-w-0">
                     <h1 class="truncate text-sm font-semibold uppercase tracking-wide sm:text-base">Rowboat Operations</h1>
-                    <p class="truncate text-[11px] text-zinc-400">Lake Union · POC telemetry dashboard</p>
+                    <p class="truncate text-[11px] text-zinc-400">South Lake Union Livery Dashboard</p>
                 </div>
             </div>
             <div class="flex items-center gap-2">
@@ -47,6 +47,13 @@
                     <div class="flex items-center gap-2">
                         <label class="search-field"><i data-lucide="search" class="h-4 w-4"></i><span class="sr-only">Search vessels</span><input id="searchInput" type="search" placeholder="Find vessel" autocomplete="off"></label>
                         <select id="statusFilter" class="select-control" aria-label="Filter by status"><option value="all">All statuses</option><option value="available">Available</option><option value="rented">Rented</option><option value="overdue">Overdue</option><option value="maintenance">Maintenance</option></select>
+                        <div class="column-menu-wrap">
+                            <button id="columnMenuButton" class="icon-button" type="button" title="Arrange table columns" aria-label="Arrange table columns" aria-expanded="false" aria-controls="columnMenu"><i data-lucide="columns-3" class="h-4 w-4"></i></button>
+                            <div id="columnMenu" class="column-menu hidden" role="dialog" aria-label="Arrange table columns">
+                                <div class="column-menu-heading"><span>Table columns</span><button id="resetColumnsButton" type="button">Reset</button></div>
+                                <div id="columnMenuList" class="column-menu-list"></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -59,7 +66,7 @@
 
                 <div class="table-shell">
                     <table class="min-w-full border-separate border-spacing-0 text-left text-xs">
-                        <thead class="relative z-30"><tr><th>Dock action</th><th>Vessel</th><th>Availability</th><th>Booked</th><th>Booked by</th><th>No. passengers</th><th>Time out</th><th>Due / ETA</th><th>Actual return</th><th>Coordinates</th><th>Mooring</th><th>Battery</th><th>Last update</th></tr></thead>
+                        <thead class="relative z-30"><tr id="fleetTableHead"></tr></thead>
                         <tbody id="fleetTableBody"><tr><td colspan="13" class="empty-cell">Waiting for fleet data…</td></tr></tbody>
                     </table>
                 </div>
