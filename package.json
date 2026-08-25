@@ -1,0 +1,7 @@
+{
+  "name": "cwb-rowboat-tracker",
+  "private": true,
+  "scripts": {
+    "dev": "node tools/dev-server.mjs"
+  }
+}
