@@ -21,13 +21,10 @@ Complete edge-to-cloud architecture stack orchestrating low-power asset tracking
  - LoRa Transceiver ModuleWio-SX1262 for XIAO (Supports US915)Seeed Studio
  - GPS Module: SparkFun GPS Breakout - NEO-M9N, SMA (Qwiic)
  - Real-Time Clock: SparkFun RV-1805 (Qwiic)
- - Thermal Array: Adafruit AMG8833 (STEMMA QT)
- - Evaluation Thermal Array: GY-906LLC-621BAB / MLX90621 (4x16)
- - Tough Flexible Solar Panel5V 5W Marine Solar Panel - ETFE CoatingAdafruit Industries
- - Solar Charge ControllerCN3083 Constant-Current Solar Management 
  - NiCad Rechargeable Battery4.8V AA NiCad Rechargeable Pack (700mAh - 1000mAh)Tenergy / BatterySpace
  - Marine Antenna915 MHz Waterproof IP67 Omnidirectional AntennaDigiKey / Amazon
  - Accelerometer: Adafruit LIS3DH (+/-2g/4g/8g/16g)
+ - RAKwireless WisGate Edge Pro Solar Bundle
 
 ### Firmware Hardware Configuration
 
