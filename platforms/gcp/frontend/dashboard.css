@@ -148,8 +148,10 @@ tbody tr.alert-row { box-shadow: inset 3px 0 #ef4444; }
 .rental-header h2 { margin-top: 3px; font-size: 17px; font-weight: 700; }
 .rental-body { display: grid; gap: 11px; padding: 15px; }
 .rental-body label { display: grid; gap: 5px; color: var(--muted); font-size: 10px; font-weight: 700; }
-.rental-body input { width: 100%; height: 36px; padding: 0 9px; border: 1px solid var(--border); border-radius: 4px; outline: 0; background: var(--bg); color: var(--text); font: 12px "JetBrains Mono", monospace; }
-.rental-body input:focus { border-color: #0ea5e9; box-shadow: 0 0 0 2px rgb(14 165 233 / .12); }
+.rental-body input:not([type="checkbox"]) { width: 100%; height: 36px; padding: 0 9px; border: 1px solid var(--border); border-radius: 4px; outline: 0; background: var(--bg); color: var(--text); font: 12px "JetBrains Mono", monospace; }
+.rental-body input:not([type="checkbox"]):focus { border-color: #0ea5e9; box-shadow: 0 0 0 2px rgb(14 165 233 / .12); }
+.rental-body .nda-confirmation { display: flex; align-items: center; gap: 8px; color: var(--text); font-size: 11px; line-height: 1.4; }
+.rental-body .nda-confirmation input { width: 14px; height: 14px; margin: 0; accent-color: #0284c7; }
 .privacy-note { display: flex; gap: 8px; padding: 10px; border: 1px solid rgb(56 189 248 / .3); border-radius: 5px; background: rgb(56 189 248 / .07); color: var(--muted); font-size: 11px; line-height: 1.5; }
 .privacy-note ul { margin: 5px 0 0; padding-left: 15px; list-style: disc; }
 .rental-summary { color: var(--text); font-size: 12px; }

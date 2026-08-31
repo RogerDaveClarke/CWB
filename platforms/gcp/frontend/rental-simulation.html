@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark">
+    <title>CWB Rental Simulation</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <link rel="stylesheet" href="./rental-simulation.css">
+</head>
+<body>
+    <div class="simulation-app">
+        <header class="simulation-header">
+            <div class="brand-cluster">
+                <a href="./index.html" class="brand-mark" aria-label="Return to operations dashboard">CWB</a>
+                <div><p class="eyebrow">Lake Union Livery</p><h1>Rental flow simulation</h1></div>
+            </div>
+            <div class="header-controls">
+                <div class="simulation-live"><span></span> Live simulation</div>
+                <button id="toggleSimulation" class="icon-button" type="button" title="Pause simulation" aria-label="Pause simulation"><i data-lucide="pause"></i></button>
+                <button id="resetSimulation" class="icon-button" type="button" title="Reset simulation" aria-label="Reset simulation"><i data-lucide="rotate-ccw"></i></button>
+            </div>
+        </header>
+
+        <main class="simulation-workspace">
+            <section class="fleet-panel" aria-labelledby="fleetHeading">
+                <div class="panel-heading"><div><p class="eyebrow">Dock board</p><h2 id="fleetHeading">Today's rentals</h2></div><span id="rentalCount" class="count-readout">0 underway</span></div>
+                <div class="fleet-table-wrap"><table class="fleet-table"><thead><tr><th>Action</th><th>Rowboat</th><th>Status</th><th>Renter</th><th>Passengers</th></tr></thead><tbody id="fleetList"></tbody></table></div>
+                <div class="simulation-settings">
+                    <label for="speedControl">Simulation speed <output id="speedValue" for="speedControl">1x</output></label>
+                    <input id="speedControl" type="range" min="0.5" max="3" value="1" step="0.5">
+                </div>
+                <section class="activity-panel" aria-labelledby="activityHeading">
+                    <div class="activity-heading"><p class="eyebrow" id="activityHeading">Dock activity</p><span id="simulationTime"></span></div>
+                    <ol id="activityList" class="activity-list" aria-live="polite"></ol>
+                </section>
+            </section>
+
+            <section class="map-panel" aria-label="Animated Lake Union boat locations">
+                <div id="map"></div>
+                <div class="map-label"><p class="eyebrow">Animated vessel positions</p><strong>South Lake Union</strong></div>
+                <div class="map-key"><span><i class="key-dot docked"></i>Docked</span><span><i class="key-dot underway"></i>Underway</span><span><i class="key-line"></i>Rental loop</span></div>
+                <div id="selectedBoat" class="selected-boat" aria-live="polite"></div>
+            </section>
+        </main>
+        <footer>Fictional guest details are generated in memory for this demonstration and are cleared at check-in.</footer>
+    </div>
+    <div id="rentalBackdrop" class="modal-backdrop hidden"></div>
+    <div id="rentalModal" class="rental-modal hidden" role="dialog" aria-modal="true" aria-labelledby="rentalTitle">
+        <form id="rentalForm">
+            <div class="rental-header"><div><p class="eyebrow">Start rental</p><h2 id="rentalTitle">Check out</h2></div><button id="rentalClose" class="icon-button" type="button" title="Close" aria-label="Close"><i data-lucide="x"></i></button></div>
+            <div class="rental-body">
+                <label><span>Renter name</span><input id="renterName" type="text" maxlength="60" placeholder="Full name" autocomplete="off" required></label>
+                <label><span>Phone number</span><input id="renterPhone" type="tel" maxlength="30" placeholder="(206) 555-0123" autocomplete="tel" inputmode="tel"></label>
+                <label><span>Number of passengers</span><input id="renterPassengers" type="number" min="1" max="6" required></label>
+                <label class="nda-confirmation"><input id="renterNdaSigned" type="checkbox" required><span>I confirm the renter has signed the NDA.</span></label>
+            </div>
+            <div class="rental-actions"><button id="rentalCancel" class="secondary-button" type="button">Cancel</button><button id="rentalConfirm" class="primary-button" type="submit">Check out</button></div>
+        </form>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+    <script src="./rental-simulation.js"></script>
+</body>
+</html>

@@ -368,6 +368,17 @@ async function checkInFromTable(boatId, button) {
 function showRentalMessage(message, success = false) { elements.rentalMessage.textContent = message; elements.rentalMessage.className = `form-message ${success ? "success" : ""}`; }
 function hideRentalMessage() { elements.rentalMessage.className = "form-message hidden"; elements.rentalMessage.textContent = ""; }
 
+function checkoutDetailsAreComplete() {
+    const renterName = document.getElementById("renterName")?.value.trim();
+    const passengerCount = Number(document.getElementById("renterPassengers")?.value);
+    const ndaSigned = document.getElementById("renterNdaSigned")?.checked;
+    return Boolean(renterName) && Number.isInteger(passengerCount) && passengerCount >= 1 && passengerCount <= 6 && ndaSigned;
+}
+
+function updateCheckoutEligibility() {
+    elements.rentalConfirm.disabled = !checkoutDetailsAreComplete();
+}
+
 function openRentalModal(boatId) {
     const boat = state.boats.get(boatId);
     if (!boat) return;
@@ -377,8 +388,13 @@ function openRentalModal(boatId) {
      document.getElementById("rentalEyebrow").textContent = "Start rental";
      elements.rentalConfirm.querySelector("span").textContent = "Check out";
      elements.rentalBody.innerHTML = `<label><span>Renter name</span><input id="renterName" type="text" maxlength="60" placeholder="Full name" autocomplete="off" required></label>
-         <label><span>Number of passengers</span><input id="renterPassengers" type="number" min="1" max="6" value="2" required></label>
+         <label><span>Phone number</span><input id="renterPhone" type="tel" maxlength="30" placeholder="(206) 555-0123" autocomplete="tel" inputmode="tel"></label>
+        <label><span>Number of passengers</span><input id="renterPassengers" type="number" min="1" max="6" required></label>
+        <label class="nda-confirmation"><input id="renterNdaSigned" type="checkbox" required><span>I confirm the renter has signed the NDA.</span></label>
          <div class="privacy-note"><i data-lucide="shield" class="h-4 w-4 shrink-0"></i><span>Location tracking starts now and runs only until check-in. The renter name and route are erased automatically when the boat returns.</span></div>`;
+    elements.rentalBody.querySelectorAll("input").forEach(input => input.addEventListener("input", updateCheckoutEligibility));
+    document.getElementById("renterNdaSigned").addEventListener("change", updateCheckoutEligibility);
+    updateCheckoutEligibility();
     elements.rentalBackdrop.classList.remove("hidden");
     elements.rentalModal.classList.remove("hidden");
     lucide.createIcons();
@@ -397,8 +413,10 @@ async function submitRentalAction(event) {
 
     const renterName = document.getElementById("renterName").value.trim();
     const passengerCount = Number(document.getElementById("renterPassengers").value);
+    const ndaSigned = document.getElementById("renterNdaSigned").checked;
     if (!renterName) { showRentalMessage("Renter name is required."); return; }
     if (!Number.isInteger(passengerCount) || passengerCount < 1 || passengerCount > 6) { showRentalMessage("Passengers must be between 1 and 6."); return; }
+    if (!ndaSigned) { showRentalMessage("Confirm that the renter has signed the NDA before checkout."); return; }
 
     elements.rentalConfirm.disabled = true;
     try {
@@ -410,7 +428,7 @@ async function submitRentalAction(event) {
         console.error("Rental action failed", error);
         showRentalMessage(error.message || "Unable to complete the dock operation.");
     } finally {
-        elements.rentalConfirm.disabled = false;
+        updateCheckoutEligibility();
     }
 }
 
