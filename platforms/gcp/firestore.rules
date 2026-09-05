@@ -8,6 +8,7 @@ service cloud.firestore {
     function validBoatConfiguration(boatId) {
       return request.resource.data.device_id == boatId
         && request.resource.data.vessel_name is string
+        && request.resource.data.boat_type is string
         && request.resource.data.availability_status in ['available', 'under_repair']
         && request.resource.data.report_interval_minutes is int
         && request.resource.data.report_interval_minutes >= 1
@@ -22,6 +23,7 @@ service cloud.firestore {
       return [
         'device_id',
         'vessel_name',
+        'boat_type',
         'availability_status',
         'report_interval_minutes',
         'schedule_year',
@@ -38,6 +40,7 @@ service cloud.firestore {
         'tracking_enabled',
         'booked',
         'booked_by',
+        'renter_type',
         'passenger_count',
         'time_out',
         'actual_time_back',
@@ -49,10 +52,12 @@ service cloud.firestore {
       return request.resource.data.availability_status in ['available', 'rented']
         && request.resource.data.tracking_enabled is bool
         && (!('booked_by' in request.resource.data) || request.resource.data.booked_by is string)
+        && (!('renter_type' in request.resource.data) || request.resource.data.renter_type in ['Public', 'Volunteer', 'Dire Hard', 'Libary Pass'])
         && (!('passenger_count' in request.resource.data) || request.resource.data.passenger_count is int)
         // A boat that is not tracking must not retain renter identity.
         && (request.resource.data.tracking_enabled == true
-            || !('booked_by' in request.resource.data));
+            || (!('booked_by' in request.resource.data)
+              && !('renter_type' in request.resource.data)));
     }
 
     match /boats/{boatId} {
@@ -79,6 +84,14 @@ service cloud.firestore {
       }
     }
 
+    match /boat_types/{typeId} {
+      allow read: if true;
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasOnly(['name'])
+        && request.resource.data.name is string;
+      allow delete: if isAdmin();
+    }
+
     match /rental_history/{recordId} {
       allow read: if true;
       // Restricting keys keeps renter identity and coordinates out of the retained log.
@@ -86,6 +99,8 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly([
           'device_id',
           'vessel_name',
+          'boat_type',
+          'renter_type',
           'checked_out_at',
           'checked_in_at',
           'duration_minutes',

@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { extname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const frontendRoot = fileURLToPath(new URL("../platforms/gcp/frontend/", import.meta.url));
+const frontendRoot = fileURLToPath(new URL("../platforms/gcp/frontend/", import.meta.url)).replace(/[\\/]$/, "");
 const port = Number(process.env.PORT || 5173);
 const mimeTypes = {
     ".css": "text/css; charset=utf-8",

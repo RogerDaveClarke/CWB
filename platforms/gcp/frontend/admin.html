@@ -5,16 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="dark light">
     <title>CWB Fleet Administration</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            darkMode: "class",
-            theme: { extend: { fontFamily: { sans: ["DM Sans", "sans-serif"], mono: ["JetBrains Mono", "monospace"] } } }
-        };
-    </script>
+    <link rel="stylesheet" href="./vendor/tailwind.css">
     <link rel="stylesheet" href="./dashboard.css">
     <link rel="stylesheet" href="./admin.css">
 </head>
@@ -54,8 +45,8 @@
 
                 <div class="admin-table-shell">
                     <table class="admin-table">
-                        <thead><tr><th>Device ID / DevEUI</th><th>Boat name</th><th>Report every</th><th>Year</th><th>Rental date range</th><th>Weekly rental hours</th><th>Available</th><th><span class="sr-only">Actions</span></th></tr></thead>
-                        <tbody id="adminTableBody"><tr><td colspan="8" class="empty-cell">Loading boat configuration…</td></tr></tbody>
+                        <thead><tr><th>Device ID / DevEUI</th><th>Boat name</th><th>Boat type</th><th>Report every</th><th>Year</th><th>Rental date range</th><th>Weekly rental hours</th><th>Available</th><th><span class="sr-only">Actions</span></th></tr></thead>
+                        <tbody id="adminTableBody"><tr><td colspan="9" class="empty-cell">Loading boat configuration…</td></tr></tbody>
                     </table>
                 </div>
                 <div class="admin-footer"><span id="fleetCount">0 boats</span><span>Changes preserve tracker telemetry and history.</span></div>
@@ -78,10 +69,16 @@
                 <div class="form-grid two-columns">
                     <label><span>Device ID / DevEUI</span><input id="deviceId" name="deviceId" type="text" maxlength="32" pattern="[0-9A-Fa-f]{16}" placeholder="70B3D57ED0000001" required><small>Exactly 16 hexadecimal characters.</small></label>
                     <label><span>Boat name</span><input id="vesselName" name="vesselName" type="text" maxlength="60" placeholder="Rowboat Martha" required></label>
+                    <label><span>Boat type</span><select id="boatType" name="boatType" required></select></label>
                     <label><span>Available</span><select id="availability" name="availability" required><option value="available">Yes</option><option value="under_repair">Under Repair</option></select></label>
                     <label><span>Schedule year</span><input id="scheduleYear" name="scheduleYear" type="number" min="2025" max="2100" required></label>
                     <label><span>Reporting interval</span><input id="reportIntervalMinutes" name="reportIntervalMinutes" type="number" min="1" max="60" step="1" value="3" required><small>Minutes between tracker reports. Allowed range: 1–60.</small></label>
                 </div>
+            </fieldset>
+
+            <fieldset class="form-section">
+                <div class="section-heading"><legend>Boat types</legend><div class="add-boat-type"><input id="newBoatType" type="text" maxlength="40" placeholder="New boat type" aria-label="New boat type"><button id="addBoatTypeButton" class="secondary-button" type="button"><i data-lucide="plus" class="h-4 w-4"></i>Add type</button></div></div>
+                <div id="boatTypeList" class="boat-type-list"></div>
             </fieldset>
 
             <fieldset class="form-section">
@@ -105,7 +102,7 @@
         </form>
     </aside>
 
-    <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+    <script src="./vendor/lucide/lucide.js"></script>
     <script type="module" src="./admin.js"></script>
 </body>
 </html>

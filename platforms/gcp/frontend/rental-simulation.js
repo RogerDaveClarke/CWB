@@ -43,10 +43,21 @@ function boatIcon(boat) { const underway = boat.phase !== "docked" && boat.phase
 function monsterIcon() { return L.icon({ iconUrl: './lakemonster.jpg', iconSize: [40, 40], iconAnchor: [20, 20] }); }
 function monsterLocation() { const progress = (state.elapsed - state.monsterStartedAt) / MONSTER_DURATION; return interpolate(LAKE_MONSTER.route, Math.min(progress, .99999)); }
 function addActivity(message) { state.activity.unshift({ message, at: state.elapsed }); state.activity = state.activity.slice(0, 8); }
-function showToast(title, message) {
+function showToast(title, message, action) {
     const toast = document.createElement("div");
     toast.className = "toast";
     toast.innerHTML = `<div><strong>${title}</strong>${message}</div>`;
+    if (action) {
+        const actionButton = document.createElement("button");
+        actionButton.className = "toast-action";
+        actionButton.type = "button";
+        actionButton.textContent = action.label;
+        actionButton.addEventListener("click", () => {
+            action.onClick();
+            toast.remove();
+        });
+        toast.appendChild(actionButton);
+    }
     elements.toastContainer.appendChild(toast);
     setTimeout(() => {
         toast.classList.add("leaving");
@@ -75,7 +86,10 @@ function maybeTriggerLateBoat() {
     const boat = candidates[Math.floor(Math.random() * candidates.length)];
     state.lateBoats.add(boat.id);
     addActivity(`${boat.name} is running late returning to the dock.`);
-    showToast("Running late", `${boat.name} is behind schedule getting back to the dock.`);
+    showToast("Running late", `${boat.name} is behind schedule getting back to the dock.`, {
+        label: "Notify Rescue",
+        onClick: () => { addActivity(`Rescue escalation requested for ${boat.name}.`); renderActivity(); }
+    });
 }
 function statusFor(boat) { return boat.guest ? "Rented" : "Available"; }
 function updateBoatStates() {

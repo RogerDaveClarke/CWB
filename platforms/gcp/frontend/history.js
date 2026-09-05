@@ -1,5 +1,4 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { collection, getFirestore, limit, onSnapshot, orderBy, query } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+let initializeApp, collection, getFirestore, limit, onSnapshot, orderBy, query;
 
 const firebaseConfig = {
     apiKey: "AIzaSyYourActualAPIKeyHere...",
@@ -56,6 +55,8 @@ function setConnection(mode, label) {
 function normalizeRecord(raw) {
     return {
         vesselName: raw.vessel_name || raw.device_id || "Unknown boat",
+        boatType: raw.boat_type || "—",
+        renterType: raw.renter_type || "—",
         checkedOutAt: toDate(raw.checked_out_at),
         checkedInAt: toDate(raw.checked_in_at),
         durationMinutes: Number(raw.duration_minutes ?? 0),
@@ -70,11 +71,13 @@ function renderTable() {
 
     elements.count.textContent = `${records.length} ${records.length === 1 ? "rental" : "rentals"}`;
     if (!records.length) {
-        elements.tableBody.innerHTML = `<tr><td colspan="6" class="empty-cell">No completed rentals recorded yet.</td></tr>`;
+        elements.tableBody.innerHTML = `<tr><td colspan="8" class="empty-cell">No completed rentals recorded yet.</td></tr>`;
         return;
     }
     elements.tableBody.innerHTML = records.map(record => `<tr>
         <td><span class="vessel-name">${escapeHtml(record.vesselName)}</span></td>
+        <td><span class="data-value">${escapeHtml(record.boatType)}</span></td>
+        <td><span class="data-value">${escapeHtml(record.renterType)}</span></td>
         <td><span class="data-value">${formatDate(record.checkedOutAt || record.checkedInAt)}</span></td>
         <td><span class="data-value">${formatClock(record.checkedOutAt)}</span></td>
         <td><span class="data-value">${formatClock(record.checkedInAt)}</span></td>
@@ -92,9 +95,11 @@ function startDemo() {
     renderTable();
 }
 
-function startFirebase() {
+async function startFirebase() {
     if (!firebaseConfig.projectId || firebaseConfig.projectId.startsWith("your-")) { startDemo(); return; }
     try {
+        ({ initializeApp } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js"));
+        ({ collection, getFirestore, limit, onSnapshot, orderBy, query } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js"));
         const db = getFirestore(initializeApp(firebaseConfig));
         const historyQuery = query(collection(db, "rental_history"), orderBy("checked_in_at", "desc"), limit(500));
         onSnapshot(historyQuery, snapshot => {

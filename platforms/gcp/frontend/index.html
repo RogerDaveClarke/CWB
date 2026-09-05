@@ -5,27 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="dark light">
     <title>CWB Rowboat Operations</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            darkMode: "class",
-            theme: { extend: { fontFamily: { sans: ["DM Sans", "sans-serif"], mono: ["JetBrains Mono", "monospace"] } } }
-        };
-    </script>
+    <link rel="stylesheet" href="./vendor/leaflet/leaflet.css">
+    <link rel="stylesheet" href="./vendor/tailwind.css">
     <link rel="stylesheet" href="./dashboard.css">
 </head>
 <body class="h-screen overflow-hidden bg-zinc-950 text-zinc-100 antialiased">
     <div id="app" class="flex h-full flex-col">
         <header class="app-header">
             <div class="flex min-w-0 items-center gap-3">
-                <div class="brand-mark" aria-hidden="true">CWB</div>
-                <div class="hidden h-7 w-px bg-zinc-700 sm:block"></div>
+                <img class="brand-logo" src="./assets/Screenshot%202026-09-04%20111147.png" alt="The Center for Wooden Boats">
                 <div class="min-w-0">
-                    <h1 class="truncate text-sm font-semibold uppercase tracking-wide sm:text-base">Rowboat Operations</h1>
+                    <h1 class="brand-title truncate text-sm font-semibold uppercase tracking-wide sm:text-base">Rowboat Operations</h1>
                     <p class="truncate text-[11px] text-zinc-400">South Lake Union Livery Dashboard</p>
                 </div>
             </div>
@@ -84,9 +74,9 @@
 
             <section id="mapPane" class="map-pane" aria-label="Live vessel map">
                 <div id="map" class="h-full w-full"></div>
-                <div class="map-title"><span class="eyebrow">OpenStreetMap</span><strong>Lake Union live positions</strong></div>
                 <div class="map-legend" aria-label="Map legend"><span><i class="legend-dot bg-sky-500"></i>Available</span><span><i class="legend-dot bg-emerald-500"></i>Rented</span><span><i class="legend-dot bg-red-500"></i>Warning</span><span><i class="legend-dot bg-zinc-500"></i>Maintenance</span></div>
                 <aside id="mapDetail" class="map-detail hidden" aria-live="polite"></aside>
+                <div class="map-attribution">Map data &copy; OpenStreetMap contributors</div>
             </section>
         </main>
 
@@ -108,8 +98,8 @@
         </form>
     </div>
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+    <script src="./vendor/leaflet/leaflet.js"></script>
+    <script src="./vendor/lucide/lucide.js"></script>
     <script type="module" src="./dashboard.js"></script>
 </body>
 </html>

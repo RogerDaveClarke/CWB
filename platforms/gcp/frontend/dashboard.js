@@ -1,6 +1,5 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-import { addDoc, collection, deleteDoc, deleteField, doc, getDocs, getFirestore, limit, onSnapshot, orderBy, query, serverTimestamp, updateDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+let initializeApp, getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut;
+let addDoc, collection, deleteDoc, deleteField, doc, getDocs, getFirestore, limit, onSnapshot, orderBy, query, serverTimestamp, updateDoc;
 
 const firebaseConfig = {
     apiKey: "AIzaSyYourActualAPIKeyHere...",
@@ -16,14 +15,17 @@ const DOCK_GEOFENCE_METERS = 55;
 const OPERATING_ZONE_METERS = 1600;
 const STALE_AFTER_MINUTES = 30;
 const DEFAULT_RENTAL_MINUTES = 60;
+const RENTER_TYPES = ["Public", "Volunteer", "Dire Hard", "Libary Pass"];
 const DEMO_RENTAL_HISTORY_KEY = "cwbDemoRentalHistory";
 const TABLE_PREFERENCES_KEY = "cwbFleetTablePreferences";
 const COLUMN_DEFINITIONS = [
     { id: "action", label: "Dock action", required: true },
     { id: "vessel", label: "Vessel" },
+    { id: "boatType", label: "Boat type" },
     { id: "availability", label: "Availability" },
     { id: "booked", label: "Booked" },
     { id: "bookedBy", label: "Booked by" },
+    { id: "renterType", label: "Renter type" },
     { id: "passengers", label: "No. passengers" },
     { id: "timeOut", label: "Time out" },
     { id: "due", label: "Due / ETA" },
@@ -48,17 +50,14 @@ function loadTablePreferences() {
 }
 
 const tablePreferences = loadTablePreferences();
-const state = { boats: new Map(), histories: new Map(), markers: new Map(), selectedId: null, routeLayer: null, historyUnsubscribes: new Map(), search: "", status: "all", columnOrder: tablePreferences.order, hiddenColumns: tablePreferences.hidden, sort: tablePreferences.sort, demoMode: false, db: null, auth: null, user: null, isStaff: false, pendingAction: null };
+const state = { boats: new Map(), histories: new Map(), markers: new Map(), selectedId: null, routeLayer: null, historyUnsubscribes: new Map(), search: "", status: "all", columnOrder: tablePreferences.order, hiddenColumns: tablePreferences.hidden, sort: tablePreferences.sort, demoMode: false, db: null, auth: null, user: null, isStaff: false, pendingAction: null, rescueRequests: new Set() };
 const elements = {
     operationsPane: document.getElementById("operationsPane"), splitter: document.getElementById("splitter"), tableHead: document.getElementById("fleetTableHead"), tableBody: document.getElementById("fleetTableBody"), columnMenuButton: document.getElementById("columnMenuButton"), columnMenu: document.getElementById("columnMenu"), columnMenuList: document.getElementById("columnMenuList"), alertsList: document.getElementById("alertsList"), alertCount: document.getElementById("alertCount"), connection: document.getElementById("connectionStatus"), dataMode: document.getElementById("dataMode"), lastRefresh: document.getElementById("lastRefresh"), mapDetail: document.getElementById("mapDetail"), search: document.getElementById("searchInput"), statusFilter: document.getElementById("statusFilter"),
     signIn: document.getElementById("signInButton"), rentalModal: document.getElementById("rentalModal"), rentalBackdrop: document.getElementById("rentalBackdrop"), rentalBody: document.getElementById("rentalBody"), rentalMessage: document.getElementById("rentalMessage"), rentalConfirm: document.getElementById("rentalConfirm"), rentalForm: document.getElementById("rentalForm"),
     metrics: { total: document.getElementById("metricTotal"), available: document.getElementById("metricAvailable"), underway: document.getElementById("metricUnderway"), alerts: document.getElementById("metricAlerts") }
 };
 
-const standardTiles = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "&copy; OpenStreetMap contributors" });
-const darkTiles = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", { maxZoom: 20, attribution: "&copy; OpenStreetMap contributors &copy; CARTO" });
-const map = L.map("map", { zoomControl: true, layers: [darkTiles] }).setView([47.6322, -122.3367], 14);
-L.control.layers({ "Dark OSM": darkTiles, "Standard OSM": standardTiles }, null, { position: "topright" }).addTo(map);
+const map = L.map("map", { zoomControl: true }).setView([47.6322, -122.3367], 14);
 
 function toDate(value) { if (!value) return null; if (value instanceof Date) return value; if (typeof value.toDate === "function") return value.toDate(); if (typeof value.seconds === "number") return new Date(value.seconds * 1000); const parsed = new Date(value); return Number.isNaN(parsed.getTime()) ? null : parsed; }
 function formatTime(value, includeDate = false) { const date = toDate(value); if (!date) return "—"; return new Intl.DateTimeFormat("en-US", { year: includeDate ? "numeric" : undefined, month: includeDate ? "2-digit" : undefined, day: includeDate ? "2-digit" : undefined, hour: "numeric", minute: "2-digit" }).format(date); }
@@ -71,7 +70,7 @@ function normalizedBoat(id, raw) {
     const availability = String(raw.availability_status || raw.availabilityStatus || "").toLowerCase();
     const mooring = ping.mooring_status || "Unknown";
     const mooringValid = ping.mooring_classification_valid ?? ping.inside_dock_geofence ?? ["Tied Up at Dock", "Underway at Dock"].includes(mooring);
-    return { id, name: raw.vessel_name || raw.vesselName || raw.name || id, availability: availability === "under_repair" ? "maintenance" : availability, trackingEnabled: raw.tracking_enabled ?? (availability === "rented"), booked: Boolean(raw.booked), bookedBy: raw.booked_by || raw.bookedBy || "", passengerCount: Number(raw.passenger_count ?? raw.passengerCount ?? 0), rentalType: String(raw.rental_type || raw.rentalType || "fixed").toLowerCase(), rentalMinutes: Number(raw.rental_minutes || raw.rentalMinutes || DEFAULT_RENTAL_MINUTES), timeOut: toDate(raw.time_out || raw.timeOut), explicitDue: toDate(raw.time_due_back || raw.timeDueBack), actualReturn: toDate(raw.actual_time_back || raw.actualTimeBack), latitude: Number(ping.latitude), longitude: Number(ping.longitude), batteryMv: Number(ping.battery_mv || 0), lowBattery: Boolean(ping.low_battery), gpsFix: ping.gps_fix !== false, mooring, mooringValid: Boolean(mooringValid), variance: mooringValid && ping.variance_g2 != null ? Number(ping.variance_g2) : null, maxTemperature: ping.max_temperature_c, timestamp: toDate(ping.timestamp), protocolVersion: ping.protocol_version, raw };
+    return { id, name: raw.vessel_name || raw.vesselName || raw.name || id, boatType: raw.boat_type || raw.boatType || "Row", availability: availability === "under_repair" ? "maintenance" : availability, trackingEnabled: raw.tracking_enabled ?? (availability === "rented"), booked: Boolean(raw.booked), bookedBy: raw.booked_by || raw.bookedBy || "", renterType: raw.renter_type || raw.renterType || "", passengerCount: Number(raw.passenger_count ?? raw.passengerCount ?? 0), rentalType: String(raw.rental_type || raw.rentalType || "fixed").toLowerCase(), rentalMinutes: Number(raw.rental_minutes || raw.rentalMinutes || DEFAULT_RENTAL_MINUTES), timeOut: toDate(raw.time_out || raw.timeOut), explicitDue: toDate(raw.time_due_back || raw.timeDueBack), actualReturn: toDate(raw.actual_time_back || raw.actualTimeBack), latitude: Number(ping.latitude), longitude: Number(ping.longitude), batteryMv: Number(ping.battery_mv || 0), lowBattery: Boolean(ping.low_battery), gpsFix: ping.gps_fix !== false, mooring, mooringValid: Boolean(mooringValid), variance: mooringValid && ping.variance_g2 != null ? Number(ping.variance_g2) : null, maxTemperature: ping.max_temperature_c, timestamp: toDate(ping.timestamp), protocolVersion: ping.protocol_version, raw };
 }
 
 function fixedDue(boat) { if (boat.explicitDue) return boat.explicitDue; if (boat.rentalType === "fixed" && boat.timeOut) return new Date(boat.timeOut.getTime() + boat.rentalMinutes * 60000); return null; }
@@ -149,9 +148,11 @@ function sortValue(boat, columnId) {
     const values = {
         action: status,
         vessel: `${boat.name} ${boat.id}`.toLowerCase(),
+        boatType: boat.boatType.toLowerCase(),
         availability: status,
         booked: boat.booked ? 1 : 0,
         bookedBy: boat.bookedBy.toLowerCase(),
+        renterType: boat.renterType.toLowerCase(),
         passengers: boat.passengerCount,
         timeOut: boat.timeOut?.getTime() ?? 0,
         due: due?.getTime() ?? 0,
@@ -175,9 +176,11 @@ function cellContent(columnId, boat, status, due, battery, availabilityLabel) {
     const cells = {
         action: () => dockActionContent(boat, status),
         vessel: () => `<span class="vessel-name">${escapeHtml(boat.name)}</span><span class="vessel-id">${escapeHtml(boat.id)}</span>`,
+        boatType: () => `<span class="data-value">${escapeHtml(boat.boatType)}</span>`,
         availability: () => badge(status, availabilityLabel),
         booked: () => `<span class="data-value">${boat.booked ? "YES" : "NO"}</span>`,
         bookedBy: () => `<span class="data-value">${boat.bookedBy ? escapeHtml(boat.bookedBy) : "—"}</span>`,
+        renterType: () => `<span class="data-value">${boat.renterType ? escapeHtml(boat.renterType) : "—"}</span>`,
         passengers: () => `<span class="data-value">${boat.passengerCount || "—"}</span>`,
         timeOut: () => `<span class="data-value">${formatTime(boat.timeOut, true)}</span><span class="cell-note">${boat.timeOut ? boat.rentalType : "No active checkout"}</span>`,
         due: () => `<span class="data-value ${due.warning ? "text-red-400" : ""}">${due.primary}</span><span class="cell-note ${due.warning ? "text-red-400" : ""}">${due.secondary}</span>`,
@@ -256,7 +259,7 @@ function renderTable() {
 
 function renderAlerts() { const alerts = [...state.boats.values()].flatMap(boat => alertsFor(boat).map(alert => ({ ...alert, boatId: boat.id }))); elements.alertCount.textContent = alerts.length; elements.metrics.alerts.textContent = alerts.length; elements.alertsList.innerHTML = alerts.length ? alerts.map(alert => `<button class="alert-item ${alert.critical ? "critical" : ""}" data-boat-id="${escapeHtml(alert.boatId)}" type="button"><span class="alert-severity"></span><span>${escapeHtml(alert.message)}</span></button>`).join("") : `<p class="no-alerts">No active fleet alerts.</p>`; elements.alertsList.querySelectorAll("button").forEach(button => button.addEventListener("click", () => selectBoat(button.dataset.boatId, true))); }
 function renderMetrics() { const boats = [...state.boats.values()]; elements.metrics.total.textContent = boats.length; elements.metrics.available.textContent = boats.filter(boat => operationalState(boat) === "available").length; elements.metrics.underway.textContent = boats.filter(boat => boat.mooring !== "Tied Up at Dock").length; }
-function renderMapDetail() { const boat = state.boats.get(state.selectedId); if (!boat) { elements.mapDetail.classList.add("hidden"); return; } const due = dueDisplay(boat); elements.mapDetail.innerHTML = `<div class="flex items-start justify-between gap-3"><div><p class="eyebrow">Selected vessel</p><h3 class="mt-1 font-semibold">${escapeHtml(boat.name)}</h3><p class="mt-1 font-mono text-[10px] text-zinc-500">${escapeHtml(boat.id)}</p></div>${badge(operationalState(boat), operationalState(boat).toUpperCase())}</div><div class="map-detail-grid"><div><span>Due / ETA</span><strong>${due.primary}</strong></div><div><span>Battery</span><strong>${(boat.batteryMv / 1000).toFixed(2)} V</strong></div><div><span>Last ping</span><strong>${formatTime(boat.timestamp)}</strong></div></div>`; elements.mapDetail.classList.remove("hidden"); }
+function renderMapDetail() { const boat = state.boats.get(state.selectedId); if (!boat) { elements.mapDetail.classList.add("hidden"); return; } const due = dueDisplay(boat); const isOverdue = isRentalOverdue(boat); const rescueRequested = state.rescueRequests.has(boat.id); const rescueControl = isOverdue ? `<button class="rescue-button" type="button" data-rescue-boat-id="${escapeHtml(boat.id)}" ${rescueRequested ? "disabled" : ""}>${rescueRequested ? "Rescue request logged" : "Notify Rescue"}</button>` : ""; elements.mapDetail.innerHTML = `<div><p class="eyebrow">Selected vessel</p><h3 class="mt-1 font-semibold">${escapeHtml(boat.name)}</h3></div><div class="map-detail-grid"><div><span>Due / ETA</span><strong>${due.primary}</strong></div><div><span>Battery</span><strong>${(boat.batteryMv / 1000).toFixed(2)} V</strong></div><div><span>Last ping</span><strong>${formatTime(boat.timestamp)}</strong></div></div>${rescueControl}`; elements.mapDetail.querySelector("[data-rescue-boat-id]")?.addEventListener("click", event => { state.rescueRequests.add(event.currentTarget.dataset.rescueBoatId); renderMapDetail(); }); elements.mapDetail.classList.remove("hidden"); }
 function drawRoute(id) { if (state.routeLayer) { state.routeLayer.remove(); state.routeLayer = null; } const boat = state.boats.get(id); if (!boat || !isRentalOverdue(boat)) return; const points = recentHistoryPoints(id); if (points.length < 2) return; state.routeLayer = L.polyline(points.map(point => [point.latitude, point.longitude]), { color: "#ef4444", weight: 3, opacity: .75, dashArray: "4 7" }).addTo(map); }
 function selectBoat(id, pan) { state.selectedId = id; const boat = state.boats.get(id); if (!boat) return; renderTable(); renderMapDetail(); drawRoute(id); if (pan && boat.gpsFix) map.flyTo([boat.latitude, boat.longitude], Math.max(map.getZoom(), 15), { duration: .7 }); }
 function syncHistorySubscriptions() {
@@ -290,6 +293,8 @@ function rentalRecord(boat, checkedOutAt, checkedInAt) {
     return {
         device_id: boat.id,
         vessel_name: boat.name,
+        boat_type: boat.boatType,
+        renter_type: boat.renterType,
         checked_out_at: checkedOutAt,
         checked_in_at: checkedInAt,
         duration_minutes: checkedOutAt ? Math.max(0, Math.round((checkedInAt - checkedOutAt) / 60000)) : 0,
@@ -297,9 +302,9 @@ function rentalRecord(boat, checkedOutAt, checkedInAt) {
     };
 }
 
-async function checkOutBoat(boat, renterName, passengerCount) {
+async function checkOutBoat(boat, renterName, renterType, passengerCount) {
     if (state.demoMode) {
-        state.boats.set(boat.id, { ...boat, availability: "rented", trackingEnabled: true, booked: true, bookedBy: renterName, passengerCount, timeOut: new Date(), actualReturn: null });
+        state.boats.set(boat.id, { ...boat, availability: "rented", trackingEnabled: true, booked: true, bookedBy: renterName, renterType, passengerCount, timeOut: new Date(), actualReturn: null });
         state.histories.set(boat.id, []);
         return;
     }
@@ -308,6 +313,7 @@ async function checkOutBoat(boat, renterName, passengerCount) {
         tracking_enabled: true,
         booked: true,
         booked_by: renterName,
+        renter_type: renterType,
         passenger_count: passengerCount,
         time_out: new Date(),
         actual_time_back: deleteField(),
@@ -324,7 +330,7 @@ async function checkInBoat(boat) {
 
     if (state.demoMode) {
         appendDemoRentalHistory({ ...record, checked_out_at: boat.timeOut?.toISOString() || null, checked_in_at: checkedInAt.toISOString() });
-        state.boats.set(boat.id, { ...boat, availability: "available", trackingEnabled: false, booked: false, bookedBy: "", passengerCount: 0, timeOut: null, actualReturn: null });
+        state.boats.set(boat.id, { ...boat, availability: "available", trackingEnabled: false, booked: false, bookedBy: "", renterType: "", passengerCount: 0, timeOut: null, actualReturn: null });
         return;
     }
 
@@ -340,6 +346,7 @@ async function checkInBoat(boat) {
         tracking_enabled: false,
         booked: false,
         booked_by: deleteField(),
+        renter_type: deleteField(),
         passenger_count: deleteField(),
         time_out: deleteField(),
         actual_time_back: deleteField(),
@@ -370,9 +377,10 @@ function hideRentalMessage() { elements.rentalMessage.className = "form-message 
 
 function checkoutDetailsAreComplete() {
     const renterName = document.getElementById("renterName")?.value.trim();
+    const renterType = document.getElementById("renterType")?.value;
     const passengerCount = Number(document.getElementById("renterPassengers")?.value);
     const ndaSigned = document.getElementById("renterNdaSigned")?.checked;
-    return Boolean(renterName) && Number.isInteger(passengerCount) && passengerCount >= 1 && passengerCount <= 6 && ndaSigned;
+    return Boolean(renterName) && RENTER_TYPES.includes(renterType) && Number.isInteger(passengerCount) && passengerCount >= 1 && passengerCount <= 6 && ndaSigned;
 }
 
 function updateCheckoutEligibility() {
@@ -388,11 +396,13 @@ function openRentalModal(boatId) {
      document.getElementById("rentalEyebrow").textContent = "Start rental";
      elements.rentalConfirm.querySelector("span").textContent = "Check out";
      elements.rentalBody.innerHTML = `<label><span>Renter name</span><input id="renterName" type="text" maxlength="60" placeholder="Full name" autocomplete="off" required></label>
+        <label><span>Renter type</span><select id="renterType" required><option value="">Select renter type</option>${RENTER_TYPES.map(type => `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`).join("")}</select></label>
          <label><span>Phone number</span><input id="renterPhone" type="tel" maxlength="30" placeholder="(206) 555-0123" autocomplete="tel" inputmode="tel"></label>
         <label><span>Number of passengers</span><input id="renterPassengers" type="number" min="1" max="6" required></label>
         <label class="nda-confirmation"><input id="renterNdaSigned" type="checkbox" required><span>I confirm the renter has signed the NDA.</span></label>
          <div class="privacy-note"><i data-lucide="shield" class="h-4 w-4 shrink-0"></i><span>Location tracking starts now and runs only until check-in. The renter name and route are erased automatically when the boat returns.</span></div>`;
-    elements.rentalBody.querySelectorAll("input").forEach(input => input.addEventListener("input", updateCheckoutEligibility));
+    elements.rentalBody.querySelectorAll("input, select").forEach(input => input.addEventListener("input", updateCheckoutEligibility));
+    document.getElementById("renterType").addEventListener("change", updateCheckoutEligibility);
     document.getElementById("renterNdaSigned").addEventListener("change", updateCheckoutEligibility);
     updateCheckoutEligibility();
     elements.rentalBackdrop.classList.remove("hidden");
@@ -412,15 +422,17 @@ async function submitRentalAction(event) {
     if (!state.demoMode && !state.isStaff) { showRentalMessage("Sign in with a dock staff account to record rentals."); return; }
 
     const renterName = document.getElementById("renterName").value.trim();
+    const renterType = document.getElementById("renterType").value;
     const passengerCount = Number(document.getElementById("renterPassengers").value);
     const ndaSigned = document.getElementById("renterNdaSigned").checked;
     if (!renterName) { showRentalMessage("Renter name is required."); return; }
+    if (!RENTER_TYPES.includes(renterType)) { showRentalMessage("Select a renter type."); return; }
     if (!Number.isInteger(passengerCount) || passengerCount < 1 || passengerCount > 6) { showRentalMessage("Passengers must be between 1 and 6."); return; }
     if (!ndaSigned) { showRentalMessage("Confirm that the renter has signed the NDA before checkout."); return; }
 
     elements.rentalConfirm.disabled = true;
     try {
-        await checkOutBoat(boat, renterName, passengerCount);
+        await checkOutBoat(boat, renterName, renterType, passengerCount);
         render();
         if (state.demoMode) closeRentalModal();
         else { showRentalMessage("Boat checked out.", true); setTimeout(closeRentalModal, 600); }
@@ -432,9 +444,12 @@ async function submitRentalAction(event) {
     }
 }
 
-function startFirebase() {
+async function startFirebase() {
     if (!firebaseConfig.projectId || firebaseConfig.projectId.startsWith("your-")) { startDemo(); return; }
     try {
+        ({ initializeApp } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js"));
+        ({ getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js"));
+        ({ addDoc, collection, deleteDoc, deleteField, doc, getDocs, getFirestore, limit, onSnapshot, orderBy, query, serverTimestamp, updateDoc } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js"));
         const app = initializeApp(firebaseConfig); window.__firebaseApp = app; const db = getFirestore(app);
         state.db = db;
         state.auth = getAuth(app);
@@ -464,8 +479,9 @@ function startDemo() {
         normalizedBoat("70b3d57ed0000006", { vessel_name: "Rowboat Dearborn", availability_status: "available", booked: true, booked_by: "Amina Yusuf", passenger_count: randomPassengerCount(), rental_type: "fixed", rental_minutes: 60, time_out: demoOperatingDate(tuesday, 3, 14, 30), actual_time_back: demoOperatingDate(tuesday, 3, 15, 35), last_ping: { protocol_version: 1, latitude: 47.62808, longitude: -122.3367, battery_mv: 4750, low_battery: false, gps_fix: true, mooring_status: "Tied Up at Dock", variance_g2: .0005, max_temperature_c: 18.7, timestamp: new Date(now.getTime() - 27000) } }),
         normalizedBoat("70b3d57ed0000007", { vessel_name: "Rowboat Cascade", availability_status: "available", booked: true, booked_by: "Lucas Martin", passenger_count: randomPassengerCount(), rental_type: "fixed", rental_minutes: 60, time_out: demoOperatingDate(tuesday, 4, 12, 30), actual_time_back: demoOperatingDate(tuesday, 4, 13, 25), last_ping: { protocol_version: 1, latitude: 47.62778, longitude: -122.33632, battery_mv: 5090, low_battery: false, gps_fix: true, mooring_status: "Tied Up at Dock", variance_g2: .0004, max_temperature_c: 19.0, timestamp: new Date(now.getTime() - 16000) } }),
         normalizedBoat("70b3d57ed0000008", { vessel_name: "Rowboat Fremont", availability_status: "available", booked: true, booked_by: "Sofia Kim", passenger_count: randomPassengerCount(), rental_type: "fixed", rental_minutes: 60, time_out: demoOperatingDate(tuesday, 4, 17, 30), actual_time_back: demoOperatingDate(tuesday, 4, 18, 24), last_ping: { protocol_version: 1, latitude: 47.62826, longitude: -122.33612, battery_mv: 4960, low_battery: false, gps_fix: true, mooring_status: "Tied Up at Dock", variance_g2: .0005, max_temperature_c: 19.3, timestamp: new Date(now.getTime() - 12000) } }),
-        normalizedBoat("70b3d57ed0000009", { vessel_name: "Rowboat Gas Works", availability_status: "rented", booked: true, booked_by: "Marcus Lee", passenger_count: randomPassengerCount(), rental_type: "open", time_out: demoOperatingDate(tuesday, 5, 13, 0), last_ping: { protocol_version: 1, latitude: 47.6346, longitude: -122.3328, battery_mv: 4680, low_battery: false, gps_fix: true, mooring_status: "Underway / Moving", variance_g2: .0017, max_temperature_c: 19.4, timestamp: new Date(now.getTime() - 8000) } }),
-        normalizedBoat("70b3d57ed0000010", { vessel_name: "Rowboat Aurora", availability_status: "rented", booked: true, booked_by: "Taylor Brooks", passenger_count: randomPassengerCount(), rental_type: "fixed", rental_minutes: 60, time_out: demoOperatingDate(tuesday, 5, 17, 30), last_ping: { protocol_version: 1, latitude: 47.6402, longitude: -122.3344, battery_mv: 4520, low_battery: false, gps_fix: true, mooring_status: "Underway / Moving", variance_g2: .0028, max_temperature_c: 19.2, timestamp: new Date(now.getTime() - 11000) } })
+        normalizedBoat("70b3d57ed0000009", { vessel_name: "Rowboat Gas Works", availability_status: "rented", booked: true, booked_by: "Marcus Lee", renter_type: "Public", passenger_count: randomPassengerCount(), rental_type: "open", time_out: demoOperatingDate(tuesday, 5, 13, 0), last_ping: { protocol_version: 1, latitude: 47.6346, longitude: -122.3328, battery_mv: 4680, low_battery: false, gps_fix: true, mooring_status: "Underway / Moving", variance_g2: .0017, max_temperature_c: 19.4, timestamp: new Date(now.getTime() - 8000) } }),
+        normalizedBoat("70b3d57ed0000010", { vessel_name: "Rowboat Aurora", availability_status: "rented", booked: true, booked_by: "Taylor Brooks", renter_type: "Volunteer", passenger_count: randomPassengerCount(), rental_type: "fixed", rental_minutes: 60, time_out: demoOperatingDate(tuesday, 5, 17, 30), last_ping: { protocol_version: 1, latitude: 47.6402, longitude: -122.3344, battery_mv: 4520, low_battery: false, gps_fix: true, mooring_status: "Underway / Moving", variance_g2: .0028, max_temperature_c: 19.2, timestamp: new Date(now.getTime() - 11000) } }),
+        normalizedBoat("70b3d57ed0000011", { vessel_name: "Purdy", availability_status: "rented", booked: true, booked_by: "Demo renter", renter_type: "Libary Pass", passenger_count: randomPassengerCount(), rental_type: "fixed", rental_minutes: 60, time_out: new Date(now.getTime() - 8 * 60 * 60000), last_ping: { protocol_version: 1, latitude: 47.6381, longitude: -122.3304, battery_mv: 4610, low_battery: false, gps_fix: true, mooring_status: "Underway / Moving", variance_g2: .0021, max_temperature_c: 19.1, timestamp: new Date(now.getTime() - 7000) } })
     ];
     state.boats = new Map(boats.filter(boat => boat.availability !== "maintenance").map(boat => [boat.id, boat])); state.histories.set(boats[8].id, demoHistory({ latitude: 47.6405, longitude: -122.3340 }, boats[8], 18, demoOperatingDate(tuesday, 5, 13, 0))); state.histories.set(boats[9].id, demoHistory(DOCK, boats[9], 24, demoOperatingDate(tuesday, 5, 17, 30))); state.selectedId = boats[8].id; elements.dataMode.textContent = "Demo mode · Tue–Sun, 12:30–18:30"; elements.signIn.classList.add("hidden"); setConnection("live", "Demo data"); render(); selectBoat(boats[8].id, false);
 }
@@ -487,7 +503,7 @@ function setupInteractions() {
     elements.search.addEventListener("input", event => { state.search = event.target.value.trim().toLowerCase(); renderTable(); });
     elements.statusFilter.addEventListener("change", event => { state.status = event.target.value; renderTable(); });
     document.getElementById("collapseAlerts").addEventListener("click", () => document.querySelector(".alerts-panel").classList.toggle("collapsed"));
-    document.getElementById("themeToggle").addEventListener("click", () => { document.documentElement.classList.toggle("dark"); if (document.documentElement.classList.contains("dark")) { if (map.hasLayer(standardTiles)) map.removeLayer(standardTiles); darkTiles.addTo(map); } else { if (map.hasLayer(darkTiles)) map.removeLayer(darkTiles); standardTiles.addTo(map); } });
+    document.getElementById("themeToggle").addEventListener("click", () => document.documentElement.classList.toggle("dark"));
     document.getElementById("fullscreenToggle").addEventListener("click", () => { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); });
     let dragging = false;
     elements.splitter.addEventListener("pointerdown", event => { dragging = true; elements.splitter.classList.add("dragging"); elements.splitter.setPointerCapture(event.pointerId); });

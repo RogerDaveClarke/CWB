@@ -1,6 +1,5 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-import { collection, deleteDoc, doc, getDocs, getFirestore, onSnapshot, serverTimestamp, setDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+let initializeApp, getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut;
+let collection, deleteDoc, doc, getDocs, getFirestore, onSnapshot, serverTimestamp, setDoc;
 
 const firebaseConfig = {
     apiKey: "AIzaSyYourActualAPIKeyHere...",
@@ -14,8 +13,10 @@ const firebaseConfig = {
 const DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 const DAY_LABELS = { monday: "Monday", tuesday: "Tuesday", wednesday: "Wednesday", thursday: "Thursday", friday: "Friday", saturday: "Saturday", sunday: "Sunday" };
 const DEMO_STORAGE_KEY = "cwbAdminBoatConfiguration";
+const DEMO_BOAT_TYPES_KEY = "cwbAdminBoatTypes";
+const DEFAULT_BOAT_TYPES = ["Row", "Capri 22", "Capri 14"];
 const currentYear = new Date().getFullYear();
-const state = { boats: new Map(), editingId: null, search: "", year: currentYear, demoMode: false, auth: null, db: null, user: null, isAdmin: false };
+const state = { boats: new Map(), boatTypes: [], editingId: null, search: "", year: currentYear, demoMode: false, auth: null, db: null, user: null, isAdmin: false };
 
 const elements = {
     tableBody: document.getElementById("adminTableBody"),
@@ -30,6 +31,9 @@ const elements = {
     formMessage: document.getElementById("formMessage"),
     deviceId: document.getElementById("deviceId"),
     vesselName: document.getElementById("vesselName"),
+    boatType: document.getElementById("boatType"),
+    newBoatType: document.getElementById("newBoatType"),
+    boatTypeList: document.getElementById("boatTypeList"),
     availability: document.getElementById("availability"),
     reportIntervalMinutes: document.getElementById("reportIntervalMinutes"),
     scheduleYear: document.getElementById("scheduleYear"),
@@ -48,6 +52,85 @@ function defaultSchedule() {
     return Object.fromEntries(DAYS.map(day => [day, { enabled: day !== "monday", start: "12:30", end: "18:30" }]));
 }
 
+function defaultBoatTypes() {
+    return DEFAULT_BOAT_TYPES.map(name => ({ id: name.toLowerCase().replaceAll(" ", "-"), name }));
+}
+
+function restoreDemoBoatTypes() {
+    try {
+        const saved = JSON.parse(localStorage.getItem(DEMO_BOAT_TYPES_KEY) || "null");
+        if (Array.isArray(saved) && saved.every(type => type && typeof type.id === "string" && typeof type.name === "string")) return saved;
+    } catch (error) { console.warn("Ignoring invalid saved boat types", error); }
+    return defaultBoatTypes();
+}
+
+function saveDemoBoatTypes() {
+    localStorage.setItem(DEMO_BOAT_TYPES_KEY, JSON.stringify(state.boatTypes));
+}
+
+function renderBoatTypeOptions(selectedType) {
+    const selected = selectedType || elements.boatType.value || state.boatTypes[0]?.name || "";
+    const types = state.boatTypes.some(type => type.name === selected) ? state.boatTypes : [...state.boatTypes, { id: "current", name: selected }];
+    elements.boatType.innerHTML = types.map(type => `<option value="${escapeHtml(type.name)}" ${type.name === selected ? "selected" : ""}>${escapeHtml(type.name)}</option>`).join("");
+}
+
+function renderBoatTypes() {
+    renderBoatTypeOptions();
+    elements.boatTypeList.innerHTML = state.boatTypes.map(type => `<div class="boat-type-row" data-type-id="${escapeHtml(type.id)}"><input class="boat-type-name" type="text" value="${escapeHtml(type.name)}" maxlength="40" aria-label="Boat type name"><button class="secondary-button save-boat-type" type="button">Save</button><button class="danger-button delete-boat-type" type="button">Remove</button></div>`).join("") || `<p class="no-boat-types">Add a boat type before creating a boat.</p>`;
+    elements.boatTypeList.querySelectorAll(".save-boat-type").forEach(button => button.addEventListener("click", () => updateBoatType(button.closest(".boat-type-row").dataset.typeId)));
+    elements.boatTypeList.querySelectorAll(".delete-boat-type").forEach(button => button.addEventListener("click", () => deleteBoatType(button.closest(".boat-type-row").dataset.typeId)));
+}
+
+function validateBoatTypeName(name, exceptId = "") {
+    const normalized = name.trim();
+    if (!normalized) return "Boat type is required.";
+    if (state.boatTypes.some(type => type.id !== exceptId && type.name.toLowerCase() === normalized.toLowerCase())) return "Boat type names must be unique.";
+    return null;
+}
+
+async function addBoatType() {
+    const name = elements.newBoatType.value;
+    const validationError = validateBoatTypeName(name);
+    if (validationError) { showMessage(validationError); return; }
+    const type = { id: crypto.randomUUID(), name: name.trim() };
+    if (!state.demoMode) await setDoc(doc(state.db, "boat_types", type.id), { name: type.name });
+    state.boatTypes.push(type);
+    if (state.demoMode) saveDemoBoatTypes();
+    elements.newBoatType.value = "";
+    renderBoatTypes();
+}
+
+async function updateBoatType(id) {
+    const type = state.boatTypes.find(item => item.id === id);
+    const input = elements.boatTypeList.querySelector(`[data-type-id="${CSS.escape(id)}"] .boat-type-name`);
+    if (!type || !input) return;
+    const name = input.value.trim();
+    const validationError = validateBoatTypeName(name, id);
+    if (validationError) { showMessage(validationError); return; }
+    const oldName = type.name;
+    type.name = name;
+    state.boats.forEach(boat => { if (boat.boatType === oldName) boat.boatType = name; });
+    if (state.demoMode) {
+        localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify([...state.boats.values()]));
+        saveDemoBoatTypes();
+    } else {
+        await setDoc(doc(state.db, "boat_types", id), { name });
+        await Promise.all([...state.boats.values()].filter(boat => boat.boatType === name).map(boat => setDoc(doc(state.db, "boats", boat.id), { boat_type: name, configuration_updated_at: serverTimestamp() }, { merge: true })));
+    }
+    renderTable();
+    renderBoatTypes();
+}
+
+async function deleteBoatType(id) {
+    const type = state.boatTypes.find(item => item.id === id);
+    if (!type) return;
+    if ([...state.boats.values()].some(boat => boat.boatType === type.name)) { showMessage(`Assign boats using ${type.name} to another type before removing it.`); return; }
+    if (!state.demoMode) await deleteDoc(doc(state.db, "boat_types", id));
+    state.boatTypes = state.boatTypes.filter(item => item.id !== id);
+    if (state.demoMode) saveDemoBoatTypes();
+    renderBoatTypes();
+}
+
 function fullYearRange(year) {
     return { start: `${year}-01-01`, end: `${year}-12-31` };
 }
@@ -63,6 +146,7 @@ function normalizeBoat(id, raw = {}) {
     return {
         id,
         vesselName: raw.vessel_name || id,
+        boatType: String(raw.boat_type || "Row"),
         availability: raw.availability_status === "under_repair" || raw.availability_status === "maintenance" ? "under_repair" : "available",
         activeRental: raw.tracking_enabled === true || raw.availability_status === "rented",
         reportIntervalMinutes: Number(raw.report_interval_minutes ?? 3),
@@ -77,6 +161,7 @@ function makeDemoBoats() {
     const names = ["Rowboat Martha", "Rowboat Colleen", "Rowboat Virginia V", "Rowboat Blanchard", "Rowboat Wagner", "Rowboat Dearborn", "Rowboat Cascade", "Rowboat Fremont", "Rowboat Gas Works", "Rowboat Aurora"];
     return names.map((name, index) => normalizeBoat(`70b3d57ed${String(index + 1).padStart(7, "0")}`, {
         vessel_name: name,
+        boat_type: "Row",
         availability_status: index === 3 ? "under_repair" : "available",
         schedule_year: currentYear,
         rental_season_start: `${currentYear}-01-01`,
@@ -121,12 +206,13 @@ function renderTable() {
     const boats = [...state.boats.values()].filter(boat => boat.scheduleYear === state.year && `${boat.id} ${boat.vesselName}`.toLowerCase().includes(state.search));
     elements.fleetCount.textContent = `${boats.length} ${boats.length === 1 ? "boat" : "boats"}`;
     if (!boats.length) {
-        elements.tableBody.innerHTML = `<tr><td colspan="7" class="empty-cell">No boats match this year and search.</td></tr>`;
+        elements.tableBody.innerHTML = `<tr><td colspan="9" class="empty-cell">No boats match this year and search.</td></tr>`;
         return;
     }
     elements.tableBody.innerHTML = boats.map(boat => `<tr>
         <td><span class="data-value">${escapeHtml(boat.id)}</span></td>
         <td><span class="vessel-name">${escapeHtml(boat.vesselName)}</span></td>
+        <td><span class="data-value">${escapeHtml(boat.boatType)}</span></td>
         <td><span class="data-value">${boat.reportIntervalMinutes} min</span></td>
         <td><span class="data-value">${boat.scheduleYear}</span></td>
         <td><span class="data-value">${formatDate(boat.seasonStart)}</span><span class="cell-note">through ${formatDate(boat.seasonEnd)}</span></td>
@@ -160,6 +246,7 @@ function openDrawer(boat = null) {
     elements.deviceId.value = boat?.id || "";
     elements.deviceId.disabled = Boolean(boat);
     elements.vesselName.value = boat?.vesselName || "";
+    renderBoatTypeOptions(boat?.boatType);
     elements.availability.value = boat?.availability || "available";
     elements.reportIntervalMinutes.value = boat?.reportIntervalMinutes || 3;
     elements.scheduleYear.value = year;
@@ -212,6 +299,7 @@ function configFromForm() {
     return {
         id: elements.deviceId.value.trim().toLowerCase(),
         vesselName: elements.vesselName.value.trim(),
+        boatType: elements.boatType.value,
         availability: elements.availability.value,
         reportIntervalMinutes: Number(elements.reportIntervalMinutes.value),
         scheduleYear: Number(elements.scheduleYear.value),
@@ -225,6 +313,7 @@ async function saveBoat(config) {
     const payload = {
         device_id: config.id,
         vessel_name: config.vesselName,
+        boat_type: config.boatType,
         availability_status: config.availability,
         report_interval_minutes: config.reportIntervalMinutes,
         schedule_year: config.scheduleYear,
@@ -276,7 +365,7 @@ async function deleteBoat() {
 function restoreDemoBoats() {
     try {
         const saved = JSON.parse(localStorage.getItem(DEMO_STORAGE_KEY) || "null");
-        if (Array.isArray(saved)) return saved.map(boat => normalizeBoat(boat.id, { vessel_name: boat.vesselName, availability_status: boat.availability, report_interval_minutes: boat.reportIntervalMinutes, schedule_year: boat.scheduleYear, rental_season_start: boat.seasonStart, rental_season_end: boat.seasonEnd, rental_schedule: boat.schedule }));
+        if (Array.isArray(saved)) return saved.map(boat => normalizeBoat(boat.id, { vessel_name: boat.vesselName, boat_type: boat.boatType, availability_status: boat.availability, report_interval_minutes: boat.reportIntervalMinutes, schedule_year: boat.scheduleYear, rental_season_start: boat.seasonStart, rental_season_end: boat.seasonEnd, rental_schedule: boat.schedule }));
     } catch (error) { console.warn("Ignoring invalid saved demo configuration", error); }
     return makeDemoBoats();
 }
@@ -284,11 +373,13 @@ function restoreDemoBoats() {
 function startDemo() {
     state.demoMode = true;
     state.isAdmin = true;
+    state.boatTypes = restoreDemoBoatTypes();
     state.boats = new Map(restoreDemoBoats().map(boat => [boat.id, boat]));
     elements.signIn.disabled = true;
     elements.signIn.innerHTML = `<i data-lucide="database" class="h-4 w-4"></i><span>Demo mode</span>`;
     setConnection("live", "Local demo");
     renderTable();
+    renderBoatTypes();
     lucide.createIcons();
 }
 
@@ -305,24 +396,37 @@ function updateAuth(user, isAdmin) {
     lucide.createIcons();
 }
 
-function startFirebase() {
+async function startFirebase() {
     if (!firebaseConfig.projectId || firebaseConfig.projectId.startsWith("your-")) { startDemo(); return; }
-    const app = initializeApp(firebaseConfig);
-    state.db = getFirestore(app);
-    state.auth = getAuth(app);
-    onAuthStateChanged(state.auth, async user => {
-        const token = user ? await user.getIdTokenResult(true) : null;
-        updateAuth(user, Boolean(token?.claims?.admin));
-    });
-    onSnapshot(collection(state.db, "boats"), snapshot => {
-        state.boats = new Map(snapshot.docs.map(document => [document.id, normalizeBoat(document.id, document.data())]));
-        setConnection(state.isAdmin ? "live" : "", state.isAdmin ? "Admin access" : "Read only");
-        renderTable();
-    }, error => {
-        console.error("Unable to load boat configuration", error);
-        setConnection("error", "Load failed");
-        elements.tableBody.innerHTML = `<tr><td colspan="8" class="empty-cell">Unable to load boat configuration.</td></tr>`;
-    });
+    try {
+        ({ initializeApp } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js"));
+        ({ getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js"));
+        ({ collection, deleteDoc, doc, getDocs, getFirestore, onSnapshot, serverTimestamp, setDoc } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js"));
+        const app = initializeApp(firebaseConfig);
+        state.db = getFirestore(app);
+        state.auth = getAuth(app);
+        onAuthStateChanged(state.auth, async user => {
+            const token = user ? await user.getIdTokenResult(true) : null;
+            updateAuth(user, Boolean(token?.claims?.admin));
+        });
+        onSnapshot(collection(state.db, "boats"), snapshot => {
+            state.boats = new Map(snapshot.docs.map(document => [document.id, normalizeBoat(document.id, document.data())]));
+            setConnection(state.isAdmin ? "live" : "", state.isAdmin ? "Admin access" : "Read only");
+            renderTable();
+        }, error => {
+            console.error("Unable to load boat configuration", error);
+            setConnection("error", "Load failed");
+            elements.tableBody.innerHTML = `<tr><td colspan="9" class="empty-cell">Unable to load boat configuration.</td></tr>`;
+        });
+        onSnapshot(collection(state.db, "boat_types"), snapshot => {
+            const types = snapshot.docs.map(document => ({ id: document.id, name: String(document.data().name || "").trim() })).filter(type => type.name);
+            if (types.length) state.boatTypes = types;
+            renderBoatTypes();
+        });
+    } catch (error) {
+        console.error("Firebase initialization failed", error);
+        setConnection("error", "Configuration error");
+    }
 }
 
 function setupControls() {
@@ -330,6 +434,7 @@ function setupControls() {
     elements.yearFilter.addEventListener("change", event => { state.year = Number(event.target.value); renderTable(); });
     elements.search.addEventListener("input", event => { state.search = event.target.value.trim().toLowerCase(); renderTable(); });
     document.getElementById("addBoatButton").addEventListener("click", () => openDrawer());
+    document.getElementById("addBoatTypeButton").addEventListener("click", addBoatType);
     elements.deleteButton.addEventListener("click", deleteBoat);
     document.getElementById("closeDrawerButton").addEventListener("click", closeDrawer);
     document.getElementById("cancelButton").addEventListener("click", closeDrawer);
@@ -363,5 +468,7 @@ function setupControls() {
 
 setupControls();
 buildScheduleEditor();
+state.boatTypes = defaultBoatTypes();
+renderBoatTypes();
 lucide.createIcons();
 startFirebase();

@@ -68,6 +68,9 @@ footer { display: flex; align-items: center; padding: 0 14px; border-top: 1px so
 .toast-container { position: fixed; z-index: 2500; top: 18px; right: 18px; display: flex; flex-direction: column; gap: 8px; width: min(320px, calc(100vw - 36px)); }
 .toast { display: flex; align-items: flex-start; gap: 9px; padding: 11px 12px; border: 1px solid #a3762f; border-radius: 6px; background: rgb(20 27 20 / .96); color: var(--ink); box-shadow: 0 12px 34px rgb(0 0 0 / .4); font-size: 12px; line-height: 1.4; animation: toast-in .25s ease-out; }
 .toast strong { display: block; color: var(--amber); font-size: 11px; }
+.toast-action { flex: 0 0 auto; min-height: 28px; padding: 0 8px; border: 1px solid #c99331; border-radius: 4px; background: #6b4b14; color: #fff1cf; font-size: 10px; font-weight: 700; cursor: pointer; }
+.toast-action:hover { border-color: #ffd27d; background: #8a611a; }
+.toast-action:focus-visible { outline: 2px solid var(--aqua); outline-offset: 2px; }
 .toast.leaving { animation: toast-out .2s ease-in forwards; }
 @keyframes toast-in { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: translateX(0); } }
 @keyframes toast-out { from { opacity: 1; } to { opacity: 0; transform: translateX(16px); } }
