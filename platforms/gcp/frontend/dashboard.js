@@ -1,14 +1,6 @@
-let initializeApp, getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut;
-let addDoc, collection, deleteDoc, deleteField, doc, getDocs, getFirestore, limit, onSnapshot, orderBy, query, serverTimestamp, updateDoc;
-
-const firebaseConfig = {
-    apiKey: "AIzaSyYourActualAPIKeyHere...",
-    authDomain: "your-project-id.firebaseapp.com",
-    projectId: "your-project-id",
-    storageBucket: "your-project-id.appspot.com",
-    messagingSenderId: "1234567890",
-    appId: "1:1234567890:web:abcdef123456"
-};
+import { firebaseConfig } from "./firebase-config.js";
+import { initAuthGuard, signOut, showAuthModal, isConfigValid } from "./auth-guard.js";
+import { addDoc, collection, deleteDoc, deleteField, doc, getDocs, limit, onSnapshot, orderBy, query, serverTimestamp, updateDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 const DOCK = { latitude: 47.62795, longitude: -122.33645 };
 const DOCK_GEOFENCE_METERS = 55;
@@ -57,7 +49,8 @@ const elements = {
     metrics: { total: document.getElementById("metricTotal"), available: document.getElementById("metricAvailable"), underway: document.getElementById("metricUnderway"), alerts: document.getElementById("metricAlerts") }
 };
 
-const map = L.map("map", { zoomControl: true }).setView([47.6322, -122.3367], 14);
+const standardTiles = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "&copy; OpenStreetMap contributors" });
+const map = L.map("map", { zoomControl: true, layers: [standardTiles] }).setView([47.6322, -122.3367], 14);
 
 function toDate(value) { if (!value) return null; if (value instanceof Date) return value; if (typeof value.toDate === "function") return value.toDate(); if (typeof value.seconds === "number") return new Date(value.seconds * 1000); const parsed = new Date(value); return Number.isNaN(parsed.getTime()) ? null : parsed; }
 function formatTime(value, includeDate = false) { const date = toDate(value); if (!date) return "—"; return new Intl.DateTimeFormat("en-US", { year: includeDate ? "numeric" : undefined, month: includeDate ? "2-digit" : undefined, day: includeDate ? "2-digit" : undefined, hour: "numeric", minute: "2-digit" }).format(date); }
@@ -136,6 +129,7 @@ function updateMarkers() {
 
 function badge(status, label) { return `<span class="badge ${status}"><i class="badge-dot"></i>${escapeHtml(label)}</span>`; }
 function dockActionContent(boat, status) {
+    if (state.isVolunteer) return `<span class="text-xs text-zinc-400 font-medium">Monitor only</span>`;
     if (status === "maintenance") return `<button class="dock-action" type="button" disabled>Unavailable</button>`;
     const isOut = status === "rented" || status === "overdue";
     return `<button class="dock-action ${isOut ? "check-in" : "check-out"}" type="button" data-action="${isOut ? "check-in" : "check-out"}" data-boat-id="${escapeHtml(boat.id)}"><i data-lucide="${isOut ? "log-in" : "log-out"}" class="h-3 w-3"></i>${isOut ? "Check in" : "Check out"}</button>`;
@@ -179,7 +173,7 @@ function cellContent(columnId, boat, status, due, battery, availabilityLabel) {
         boatType: () => `<span class="data-value">${escapeHtml(boat.boatType)}</span>`,
         availability: () => badge(status, availabilityLabel),
         booked: () => `<span class="data-value">${boat.booked ? "YES" : "NO"}</span>`,
-        bookedBy: () => `<span class="data-value">${boat.bookedBy ? escapeHtml(boat.bookedBy) : "—"}</span>`,
+        bookedBy: () => `<span class="data-value">${boat.bookedBy ? (state.isVolunteer ? "Rented" : escapeHtml(boat.bookedBy)) : "—"}</span>`,
         renterType: () => `<span class="data-value">${boat.renterType ? escapeHtml(boat.renterType) : "—"}</span>`,
         passengers: () => `<span class="data-value">${boat.passengerCount || "—"}</span>`,
         timeOut: () => `<span class="data-value">${formatTime(boat.timeOut, true)}</span><span class="cell-note">${boat.timeOut ? boat.rentalType : "No active checkout"}</span>`,
@@ -445,24 +439,75 @@ async function submitRentalAction(event) {
 }
 
 async function startFirebase() {
-    if (!firebaseConfig.projectId || firebaseConfig.projectId.startsWith("your-")) { startDemo(); return; }
+    // Always show auth modal first, regardless of config state
+    showAuthModal("signIn");
+    
+    if (!isConfigValid()) {
+        console.error("Firebase config is invalid:", firebaseConfig);
+        setConnection("error", "Configuration error");
+        showAuthModal("error", { message: "Firebase configuration missing. Please contact administrator." });
+        return;
+    }
     try {
-        ({ initializeApp } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js"));
-        ({ getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js"));
-        ({ addDoc, collection, deleteDoc, deleteField, doc, getDocs, getFirestore, limit, onSnapshot, orderBy, query, serverTimestamp, updateDoc } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js"));
-        const app = initializeApp(firebaseConfig); window.__firebaseApp = app; const db = getFirestore(app);
-        state.db = db;
-        state.auth = getAuth(app);
-        onAuthStateChanged(state.auth, async user => {
-            const token = user ? await user.getIdTokenResult(true) : null;
-            state.user = user;
-            state.isStaff = Boolean(token?.claims?.admin);
-            elements.signIn.innerHTML = `<i data-lucide="${user ? "log-out" : "log-in"}" class="h-4 w-4"></i>`;
-            elements.signIn.title = user ? `Sign out ${user.displayName || user.email || ""}`.trim() : "Sign in for dock operations";
-            lucide.createIcons();
+        await initAuthGuard({ roles: ["admin", "manager", "staff", "volunteer"], functionLevels: ["operations"] }, {
+            onReady: ({ user, claims, db }) => {
+                state.db = db;
+                state.user = user;
+                state.role = claims.role;
+                state.functionLevel = claims.functionLevel;
+                state.isAdmin = claims.isAdmin;
+                state.isStaff = claims.isAdmin || claims.role === "manager" || claims.role === "staff";
+                state.isVolunteer = claims.role === "volunteer";
+
+                elements.signIn.classList.remove("hidden");
+                elements.signIn.innerHTML = `<i data-lucide="log-out" class="h-4 w-4"></i>`;
+                elements.signIn.title = `Sign out ${user.displayName || user.email || ""}`.trim();
+                lucide.createIcons();
+
+                onSnapshot(collection(db, "boats"), snapshot => {
+                    state.demoMode = false;
+                    if (snapshot.empty) {
+                        state.boats.clear();
+                        elements.dataMode.textContent = "Firebase live mode · 0 boats";
+                        setConnection("live", "Firebase live (0 boats)");
+                        elements.tableBody.innerHTML = `<tr><td colspan="13" class="empty-cell">No boats configured in Firestore yet. Use <a class="text-sky-400 underline" href="./admin.html">Fleet Administration</a> to add boats.</td></tr>`;
+                        render();
+                        return;
+                    }
+                    const next = new Map();
+                    snapshot.forEach(document => { const boat = normalizedBoat(document.id, document.data()); if (boat.availability === "maintenance") return; next.set(boat.id, boat); addLivePoint(boat); });
+                    state.boats = next;
+                    if (!next.has(state.selectedId)) state.selectedId = next.size ? next.keys().next().value : null;
+                    syncHistorySubscriptions();
+                    elements.dataMode.textContent = "Firebase live mode";
+                    setConnection("live", "Firebase live");
+                    render();
+                }, error => {
+                    console.error("Firestore listener failed", error);
+                    setConnection("error", "Access denied");
+                    elements.tableBody.innerHTML = `<tr><td colspan="13" class="empty-cell">Unable to load fleet data. Sign in with an authorized CWB account.</td></tr>`;
+                });
+            },
+            onDenied: (reason) => {
+                state.user = null;
+                state.boats.clear();
+                setConnection("error", "Access restricted");
+                elements.tableBody.innerHTML = `<tr><td colspan="13" class="empty-cell">Sign in required.</td></tr>`;
+            },
+            onSignedOut: () => {
+                state.user = null;
+                state.boats.clear();
+                elements.signIn.innerHTML = `<i data-lucide="log-in" class="h-4 w-4"></i>`;
+                elements.signIn.title = "Sign in";
+                lucide.createIcons();
+                setConnection("", "Sign in required");
+                elements.tableBody.innerHTML = `<tr><td colspan="13" class="empty-cell">Sign in required to view operations.</td></tr>`;
+            }
         });
-        onSnapshot(collection(db, "boats"), snapshot => { const next = new Map(); snapshot.forEach(document => { const boat = normalizedBoat(document.id, document.data()); if (boat.availability === "maintenance") return; next.set(boat.id, boat); addLivePoint(boat); }); state.boats = next; if (!next.has(state.selectedId)) state.selectedId = next.size ? next.keys().next().value : null; syncHistorySubscriptions(); setConnection("live", "Firebase live"); render(); }, error => { console.error("Firestore listener failed", error); setConnection("error", "Connection error"); elements.tableBody.innerHTML = `<tr><td colspan="${visibleColumns().length}" class="empty-cell">Unable to load Firebase telemetry. Check the console and Firestore configuration.</td></tr>`; });
-    } catch (error) { console.error("Firebase initialization failed", error); setConnection("error", "Configuration error"); }
+    } catch (error) {
+        console.error("Firebase initialization failed", error);
+        setConnection("error", "Configuration error");
+    }
 }
 
 function demoHistory(origin, destination, count, startedAt) { return Array.from({ length: count }, (_, index) => { const progress = index / (count - 1); const wave = Math.sin(index * 1.7) * .00035; return { latitude: origin.latitude + (destination.latitude - origin.latitude) * progress + wave, longitude: origin.longitude + (destination.longitude - origin.longitude) * progress + wave * .7, timestamp: new Date(startedAt.getTime() + index * 3 * 60000) }; }); }
@@ -496,14 +541,11 @@ function setupInteractions() {
     elements.columnMenuButton.addEventListener("click", event => { event.stopPropagation(); setColumnMenuOpen(elements.columnMenu.classList.contains("hidden")); });
     document.getElementById("resetColumnsButton").addEventListener("click", () => { state.columnOrder = [...DEFAULT_COLUMN_ORDER]; state.hiddenColumns.clear(); state.sort = { column: "vessel", direction: "asc" }; saveTablePreferences(); renderColumnMenu(); renderTable(); });
     elements.signIn.addEventListener("click", async () => {
-        if (state.demoMode || !state.auth) return;
-        try { if (state.user) await signOut(state.auth); else await signInWithPopup(state.auth, new GoogleAuthProvider()); }
-        catch (error) { console.error("Authentication failed", error); setConnection("error", "Sign-in failed"); }
+        if (state.user) await signOut(); else showAuthModal("signIn");
     });
     elements.search.addEventListener("input", event => { state.search = event.target.value.trim().toLowerCase(); renderTable(); });
     elements.statusFilter.addEventListener("change", event => { state.status = event.target.value; renderTable(); });
     document.getElementById("collapseAlerts").addEventListener("click", () => document.querySelector(".alerts-panel").classList.toggle("collapsed"));
-    document.getElementById("themeToggle").addEventListener("click", () => document.documentElement.classList.toggle("dark"));
     document.getElementById("fullscreenToggle").addEventListener("click", () => { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); });
     let dragging = false;
     elements.splitter.addEventListener("pointerdown", event => { dragging = true; elements.splitter.classList.add("dragging"); elements.splitter.setPointerCapture(event.pointerId); });

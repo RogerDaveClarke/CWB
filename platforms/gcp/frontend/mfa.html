@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Set up two-factor authentication - CWB</title>
+    <link rel="stylesheet" href="./vendor/tailwind.css">
+    <link rel="stylesheet" href="./admin.css">
+    <script src="./vendor/lucide/lucide.js" defer></script>
+</head>
+<body class="bg-slate-100 min-h-screen">
+    <main class="max-w-lg mx-auto py-16 px-6">
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-8">
+            <h1 class="text-2xl font-semibold text-slate-900 mb-2">Two-factor authentication</h1>
+            <p class="text-slate-600 mb-6">Secure your account with a time-based code from an authenticator app (Google Authenticator, Authy, 1Password).</p>
+
+            <div id="mfaStatus" class="mb-4 text-sm text-slate-500">Checking sign-in…</div>
+
+            <div id="enrollPanel" class="hidden">
+                <ol class="list-decimal list-inside space-y-3 text-slate-700 mb-6">
+                    <li>Open your authenticator app.</li>
+                    <li>Choose <strong>Add account</strong> and scan the QR code, or enter the setup key manually.</li>
+                    <li>Type the 6-digit code shown in the app below.</li>
+                </ol>
+                <div class="flex justify-center mb-4"><div id="qrBox" class="p-3 bg-white border border-slate-200 rounded-lg"></div></div>
+                <div class="mb-4">
+                    <label class="block text-xs font-medium text-slate-500 mb-1">Manual setup key</label>
+                    <code id="secretKey" class="block break-all bg-slate-50 border border-slate-200 rounded px-3 py-2 text-sm text-slate-800 select-all"></code>
+                </div>
+                <div class="mb-4">
+                    <label for="totpCode" class="block text-sm font-medium text-slate-700 mb-1">6-digit code</label>
+                    <input id="totpCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="\d{6}"
+                        class="w-full border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="123456">
+                </div>
+                <button id="verifyButton" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg px-4 py-2">Verify and enable</button>
+                <p id="enrollMessage" class="mt-3 text-sm text-red-600"></p>
+            </div>
+
+            <div id="donePanel" class="hidden text-center">
+                <p class="text-green-700 font-medium mb-4">Two-factor authentication is enabled.</p>
+                <a href="./index.html" class="text-blue-600 hover:underline">Continue to the dashboard →</a>
+            </div>
+
+            <div id="signinPanel" class="hidden text-center">
+                <p class="text-slate-600 mb-4">You need to sign in before enabling two-factor authentication.</p>
+                <a href="./index.html" class="text-blue-600 hover:underline">Go to sign in →</a>
+            </div>
+
+            <div id="reauthPanel" class="hidden text-center">
+                <p class="text-slate-600 mb-4">For your security, confirm your identity again before adding a second factor.</p>
+                <button id="reauthButton" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg px-4 py-2">Confirm identity</button>
+                <p id="reauthMessage" class="mt-3 text-sm text-red-600"></p>
+            </div>
+        </div>
+    </main>
+    <script type="module" src="./mfa.js"></script>
+</body>
+</html>

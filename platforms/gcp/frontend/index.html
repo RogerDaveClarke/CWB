@@ -1,7 +1,10 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="dark light">
     <title>CWB Rowboat Operations</title>
@@ -25,7 +28,6 @@
                 <button id="signInButton" class="icon-button" type="button" title="Sign in for dock operations" aria-label="Sign in for dock operations"><i data-lucide="log-in" class="h-4 w-4"></i></button>
                 <a href="./history.html" class="icon-button" title="Rental history" aria-label="Rental history"><i data-lucide="history" class="h-4 w-4"></i></a>
                 <a href="./admin.html" class="icon-button" title="Fleet administration" aria-label="Fleet administration"><i data-lucide="settings" class="h-4 w-4"></i></a>
-                <button id="themeToggle" class="icon-button" type="button" title="Toggle color theme" aria-label="Toggle color theme"><i data-lucide="sun" class="h-4 w-4"></i></button>
                 <button id="fullscreenToggle" class="icon-button" type="button" title="Toggle fullscreen" aria-label="Toggle fullscreen"><i data-lucide="maximize" class="h-4 w-4"></i></button>
             </div>
         </header>
@@ -76,7 +78,6 @@
                 <div id="map" class="h-full w-full"></div>
                 <div class="map-legend" aria-label="Map legend"><span><i class="legend-dot bg-sky-500"></i>Available</span><span><i class="legend-dot bg-emerald-500"></i>Rented</span><span><i class="legend-dot bg-red-500"></i>Warning</span><span><i class="legend-dot bg-zinc-500"></i>Maintenance</span></div>
                 <aside id="mapDetail" class="map-detail hidden" aria-live="polite"></aside>
-                <div class="map-attribution">Map data &copy; OpenStreetMap contributors</div>
             </section>
         </main>
 
