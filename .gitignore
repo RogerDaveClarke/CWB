@@ -2,4 +2,8 @@ firmware/.pio/
 firmware/compile_commands.json
 .env
 .env.*
+*.env
 firmware/include/secrets.h
+node_modules/
+platforms/gcp/frontend/firebase-config.js
+platforms/gcp/.firebase/
