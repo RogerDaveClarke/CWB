@@ -3,7 +3,11 @@
   "version": "1.0.0",
   "description": "GCP HTTP Cloud Function mapping LoRaWAN payloads to Firestore",
   "main": "index.js",
+  "engines": {
+    "node": "20"
+  },
   "dependencies": {
-    "firebase-admin": "^11.8.0"
+    "firebase-admin": "^11.8.0",
+    "firebase-functions": "^4.9.0"
   }
 }

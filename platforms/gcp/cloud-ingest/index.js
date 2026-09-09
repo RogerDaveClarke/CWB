@@ -101,3 +101,13 @@ exports.telemetryIngest = async (req, res) => {
     return res.status(500).send('Internal Data Stream Interrupted.');
   }
 };
+
+// Account administration callable functions (inviteUser, setUserRole, etc.).
+// Exported alongside the telemetry ingest HTTP function.
+const userAdmin = require('./userAdmin');
+exports.inviteUser = userAdmin.inviteUser;
+exports.setUserRole = userAdmin.setUserRole;
+exports.disableUser = userAdmin.disableUser;
+exports.enableUser = userAdmin.enableUser;
+exports.resetUserMfa = userAdmin.resetUserMfa;
+exports.listUsers = userAdmin.listUsers;

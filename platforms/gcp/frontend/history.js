@@ -1,13 +1,6 @@
-let initializeApp, collection, getFirestore, limit, onSnapshot, orderBy, query;
-
-const firebaseConfig = {
-    apiKey: "AIzaSyYourActualAPIKeyHere...",
-    authDomain: "your-project-id.firebaseapp.com",
-    projectId: "your-project-id",
-    storageBucket: "your-project-id.appspot.com",
-    messagingSenderId: "1234567890",
-    appId: "1:1234567890:web:abcdef123456"
-};
+import { firebaseConfig } from "./firebase-config.js";
+import { initAuthGuard, showAuthModal, isConfigValid } from "./auth-guard.js";
+import { collection, limit, onSnapshot, orderBy, query } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 const DEMO_RENTAL_HISTORY_KEY = "cwbDemoRentalHistory";
 const state = { records: [], search: "" };
@@ -86,30 +79,58 @@ function renderTable() {
     </tr>`).join("");
 }
 
+function defaultDemoHistory() {
+    const now = new Date();
+    return [
+        { vessel_name: "Rowboat Martha", boat_type: "Row", renter_type: "Public", checked_out_at: new Date(now - 120*60000).toISOString(), checked_in_at: new Date(now - 63*60000).toISOString(), duration_minutes: 57, passenger_count: 3 },
+        { vessel_name: "Rowboat Colleen", boat_type: "Row", renter_type: "Volunteer", checked_out_at: new Date(now - 240*60000).toISOString(), checked_in_at: new Date(now - 178*60000).toISOString(), duration_minutes: 62, passenger_count: 2 },
+        { vessel_name: "Rowboat Virginia V", boat_type: "Row", renter_type: "Dire Hard", checked_out_at: new Date(now - 360*60000).toISOString(), checked_in_at: new Date(now - 304*60000).toISOString(), duration_minutes: 56, passenger_count: 4 }
+    ];
+}
+
 function startDemo() {
     try {
         const saved = JSON.parse(localStorage.getItem(DEMO_RENTAL_HISTORY_KEY) || "[]");
-        state.records = saved.map(normalizeRecord);
-    } catch { state.records = []; }
+        state.records = (saved.length ? saved : defaultDemoHistory()).map(normalizeRecord);
+    } catch { state.records = defaultDemoHistory().map(normalizeRecord); }
     setConnection("live", "Demo data");
     renderTable();
 }
 
 async function startFirebase() {
-    if (!firebaseConfig.projectId || firebaseConfig.projectId.startsWith("your-")) { startDemo(); return; }
+    if (!isConfigValid()) {
+        setConnection("error", "Not configured");
+        showAuthModal("signIn");
+        return;
+    }
     try {
-        ({ initializeApp } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js"));
-        ({ collection, getFirestore, limit, onSnapshot, orderBy, query } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js"));
-        const db = getFirestore(initializeApp(firebaseConfig));
-        const historyQuery = query(collection(db, "rental_history"), orderBy("checked_in_at", "desc"), limit(500));
-        onSnapshot(historyQuery, snapshot => {
-            state.records = snapshot.docs.map(document => normalizeRecord(document.data()));
-            setConnection("live", "Firebase live");
-            renderTable();
-        }, error => {
-            console.error("Unable to load rental history", error);
-            setConnection("error", "Load failed");
-            elements.tableBody.innerHTML = `<tr><td colspan="6" class="empty-cell">Unable to load rental history.</td></tr>`;
+        await initAuthGuard({ roles: ["admin", "manager", "staff"], functionLevels: ["operations", "administration"] }, {
+            onReady: ({ db }) => {
+                const historyQuery = query(collection(db, "rental_history"), orderBy("checked_in_at", "desc"), limit(500));
+                onSnapshot(historyQuery, snapshot => {
+                    if (snapshot.empty) {
+                        state.records = [];
+                        setConnection("live", "Firebase live (0 records)");
+                        renderTable();
+                        return;
+                    }
+                    state.records = snapshot.docs.map(document => normalizeRecord(document.data()));
+                    setConnection("live", "Firebase live");
+                    renderTable();
+                }, error => {
+                    console.error("Unable to load rental history", error);
+                    setConnection("error", "Access denied");
+                    elements.tableBody.innerHTML = `<tr><td colspan="8" class="empty-cell">Unable to load rental history. Sign in with an authorized account.</td></tr>`;
+                });
+            },
+            onDenied: () => {
+                setConnection("error", "Access restricted");
+                elements.tableBody.innerHTML = `<tr><td colspan="8" class="empty-cell">Access restricted. Sign in with an authorized account.</td></tr>`;
+            },
+            onSignedOut: () => {
+                setConnection("", "Sign in required");
+                elements.tableBody.innerHTML = `<tr><td colspan="8" class="empty-cell">Sign in required to view rental history.</td></tr>`;
+            }
         });
     } catch (error) {
         console.error("Firebase initialization failed", error);
@@ -118,7 +139,5 @@ async function startFirebase() {
 }
 
 elements.search.addEventListener("input", event => { state.search = event.target.value.trim().toLowerCase(); renderTable(); });
-document.getElementById("themeToggle").addEventListener("click", () => document.documentElement.classList.toggle("dark"));
-
 lucide.createIcons();
 startFirebase();

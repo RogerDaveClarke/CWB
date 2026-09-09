@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Account administration - CWB</title>
+    <link rel="stylesheet" href="./vendor/tailwind.css">
+    <link rel="stylesheet" href="./admin.css">
+    <script src="./vendor/lucide/lucide.js" defer></script>
+</head>
+<body class="bg-slate-100 min-h-screen">
+    <header class="bg-white border-b border-slate-200">
+        <div class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+            <div>
+                <h1 class="text-xl font-semibold text-slate-900">Account administration</h1>
+                <p class="text-sm text-slate-500">Manage staff and volunteer access, roles, and two-factor authentication.</p>
+            </div>
+            <div class="flex items-center gap-3">
+                <span id="usersConnection" class="connection-pill"><span class="status-dot"></span><span class="hidden sm:inline">…</span></span>
+                <a href="./admin.html" class="text-sm text-blue-600 hover:underline">Fleet admin</a>
+                <a href="./index.html" class="text-sm text-blue-600 hover:underline">Dashboard</a>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-6xl mx-auto px-6 py-8">
+        <div id="deniedPanel" class="hidden bg-white border border-slate-200 rounded-xl p-8 text-center">
+            <p class="text-slate-600">You do not have permission to manage accounts. Contact an administrator.</p>
+        </div>
+
+        <div id="adminPanel" class="hidden">
+            <section class="bg-white border border-slate-200 rounded-xl p-6 mb-6">
+                <h2 class="text-lg font-medium text-slate-900 mb-4">Invite user</h2>
+                <form id="inviteForm" class="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
+                    <div class="md:col-span-2">
+                        <label class="block text-xs font-medium text-slate-500 mb-1" for="inviteEmail">Email</label>
+                        <input id="inviteEmail" type="email" required class="w-full border border-slate-300 rounded-lg px-3 py-2" placeholder="name@example.org">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1" for="inviteName">Name</label>
+                        <input id="inviteName" type="text" class="w-full border border-slate-300 rounded-lg px-3 py-2" placeholder="Full name">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1" for="inviteRole">Role</label>
+                        <select id="inviteRole" class="w-full border border-slate-300 rounded-lg px-3 py-2">
+                            <option value="volunteer">Volunteer</option>
+                            <option value="staff">Staff</option>
+                            <option value="manager">Manager</option>
+                            <option value="admin">Admin</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-500 mb-1" for="inviteFunction">Function</label>
+                        <select id="inviteFunction" class="w-full border border-slate-300 rounded-lg px-3 py-2">
+                            <option value="operations">Operations</option>
+                            <option value="administration">Administration</option>
+                        </select>
+                    </div>
+                    <div class="md:col-span-5 flex items-center gap-3">
+                        <button type="submit" id="inviteButton" class="bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg px-4 py-2">Send invite</button>
+                        <p id="inviteMessage" class="text-sm"></p>
+                    </div>
+                </form>
+            </section>
+
+            <section class="bg-white border border-slate-200 rounded-xl p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-medium text-slate-900">Users</h2>
+                    <button id="refreshButton" class="secondary-button" type="button">Refresh</button>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full text-sm">
+                        <thead>
+                            <tr class="text-left text-slate-500 border-b border-slate-200">
+                                <th class="py-2 pr-4">Name</th>
+                                <th class="py-2 pr-4">Email</th>
+                                <th class="py-2 pr-4">Role</th>
+                                <th class="py-2 pr-4">Function</th>
+                                <th class="py-2 pr-4">2FA</th>
+                                <th class="py-2 pr-4">Status</th>
+                                <th class="py-2 pr-4 text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="usersTableBody"></tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <script type="module" src="./users.js"></script>
+</body>
+</html>

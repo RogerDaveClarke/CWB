@@ -1,14 +1,6 @@
-let initializeApp, getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut;
-let collection, deleteDoc, doc, getDocs, getFirestore, onSnapshot, serverTimestamp, setDoc;
-
-const firebaseConfig = {
-    apiKey: "AIzaSyYourActualAPIKeyHere...",
-    authDomain: "your-project-id.firebaseapp.com",
-    projectId: "your-project-id",
-    storageBucket: "your-project-id.appspot.com",
-    messagingSenderId: "1234567890",
-    appId: "1:1234567890:web:abcdef123456"
-};
+import { firebaseConfig } from "./firebase-config.js";
+import { initAuthGuard, signOut, showAuthModal, isConfigValid } from "./auth-guard.js";
+import { collection, deleteDoc, doc, getDocs, onSnapshot, serverTimestamp, setDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 const DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 const DAY_LABELS = { monday: "Monday", tuesday: "Tuesday", wednesday: "Wednesday", thursday: "Thursday", friday: "Friday", saturday: "Saturday", sunday: "Sunday" };
@@ -397,31 +389,48 @@ function updateAuth(user, isAdmin) {
 }
 
 async function startFirebase() {
-    if (!firebaseConfig.projectId || firebaseConfig.projectId.startsWith("your-")) { startDemo(); return; }
+    if (!isConfigValid()) {
+        setConnection("error", "Not configured");
+        showAuthModal("signIn");
+        return;
+    }
     try {
-        ({ initializeApp } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js"));
-        ({ getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js"));
-        ({ collection, deleteDoc, doc, getDocs, getFirestore, onSnapshot, serverTimestamp, setDoc } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js"));
-        const app = initializeApp(firebaseConfig);
-        state.db = getFirestore(app);
-        state.auth = getAuth(app);
-        onAuthStateChanged(state.auth, async user => {
-            const token = user ? await user.getIdTokenResult(true) : null;
-            updateAuth(user, Boolean(token?.claims?.admin));
-        });
-        onSnapshot(collection(state.db, "boats"), snapshot => {
-            state.boats = new Map(snapshot.docs.map(document => [document.id, normalizeBoat(document.id, document.data())]));
-            setConnection(state.isAdmin ? "live" : "", state.isAdmin ? "Admin access" : "Read only");
-            renderTable();
-        }, error => {
-            console.error("Unable to load boat configuration", error);
-            setConnection("error", "Load failed");
-            elements.tableBody.innerHTML = `<tr><td colspan="9" class="empty-cell">Unable to load boat configuration.</td></tr>`;
-        });
-        onSnapshot(collection(state.db, "boat_types"), snapshot => {
-            const types = snapshot.docs.map(document => ({ id: document.id, name: String(document.data().name || "").trim() })).filter(type => type.name);
-            if (types.length) state.boatTypes = types;
-            renderBoatTypes();
+        await initAuthGuard({ requireAdmin: true }, {
+            onReady: ({ user, claims, db }) => {
+                state.db = db;
+                state.user = user;
+                state.isAdmin = claims.isAdmin;
+                updateAuth(user, true);
+
+                onSnapshot(collection(state.db, "boats"), snapshot => {
+                    if (snapshot.empty) {
+                        state.boats.clear();
+                        renderTable();
+                        return;
+                    }
+                    state.boats = new Map(snapshot.docs.map(document => [document.id, normalizeBoat(document.id, document.data())]));
+                    setConnection(state.isAdmin ? "live" : "", state.isAdmin ? "Admin access" : "Read only");
+                    renderTable();
+                }, error => {
+                    console.error("Unable to load boat configuration", error);
+                    setConnection("error", "Access denied");
+                    elements.tableBody.innerHTML = `<tr><td colspan="9" class="empty-cell">Unable to load boat configuration. Sign in with an Administrator account.</td></tr>`;
+                });
+
+                onSnapshot(collection(state.db, "boat_types"), snapshot => {
+                    const types = snapshot.docs.map(document => ({ id: document.id, name: String(document.data().name || "").trim() })).filter(type => type.name);
+                    if (types.length) state.boatTypes = types;
+                    renderBoatTypes();
+                });
+            },
+            onDenied: () => {
+                updateAuth(null, false);
+                elements.tableBody.innerHTML = `<tr><td colspan="9" class="empty-cell">Sign in with an Administrator account required.</td></tr>`;
+            },
+            onSignedOut: () => {
+                updateAuth(null, false);
+                elements.tableBody.innerHTML = `<tr><td colspan="9" class="empty-cell">Sign in with an Administrator account required.</td></tr>`;
+            }
         });
     } catch (error) {
         console.error("Firebase initialization failed", error);
@@ -440,7 +449,6 @@ function setupControls() {
     document.getElementById("cancelButton").addEventListener("click", closeDrawer);
     elements.backdrop.addEventListener("click", closeDrawer);
     document.addEventListener("keydown", event => { if (event.key === "Escape" && elements.drawer.classList.contains("open")) closeDrawer(); });
-    document.getElementById("themeToggle").addEventListener("click", () => document.documentElement.classList.toggle("dark"));
     document.getElementById("applyToOpenDays").addEventListener("click", () => {
         const tuesday = elements.weeklySchedule.querySelector('[data-day="tuesday"]');
         const start = tuesday.querySelector(".day-start").value;
@@ -449,9 +457,7 @@ function setupControls() {
     });
     elements.scheduleYear.addEventListener("change", () => { const range = fullYearRange(Number(elements.scheduleYear.value)); elements.seasonStart.value = range.start; elements.seasonEnd.value = range.end; });
     elements.signIn.addEventListener("click", async () => {
-        if (state.demoMode) return;
-        try { if (state.user) await signOut(state.auth); else await signInWithPopup(state.auth, new GoogleAuthProvider()); }
-        catch (error) { console.error("Authentication failed", error); setConnection("error", "Sign-in failed"); }
+        if (state.user) await signOut(); else showAuthModal("signIn");
     });
     elements.form.addEventListener("submit", async event => {
         event.preventDefault();
