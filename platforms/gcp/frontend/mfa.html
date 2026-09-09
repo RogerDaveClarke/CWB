@@ -3,56 +3,298 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Set up two-factor authentication - CWB</title>
+    <meta name="color-scheme" content="dark light">
+    <title>Two-Factor Authentication - CWB</title>
     <link rel="stylesheet" href="./vendor/tailwind.css">
+    <link rel="stylesheet" href="./dashboard.css">
     <link rel="stylesheet" href="./admin.css">
     <script src="./vendor/lucide/lucide.js" defer></script>
+    <style>
+        .mfa-page-container {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            background: var(--bg);
+            color: var(--text);
+        }
+        .mfa-card {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            box-shadow: 0 10px 30px -5px rgb(0 0 0 / 0.3);
+            max-width: 540px;
+            width: 100%;
+            margin: 0 auto;
+            overflow: hidden;
+        }
+        .step-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            border-radius: 999px;
+            background: #0284c7;
+            color: #ffffff;
+            font-size: 11px;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+        .step-item {
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+            padding: 10px 14px;
+            background: var(--panel-raised);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+        .step-text {
+            font-size: 13px;
+            line-height: 1.4;
+            color: var(--text);
+        }
+        .step-text small {
+            display: block;
+            color: var(--muted);
+            font-size: 11px;
+            margin-top: 2px;
+        }
+        .otp-input {
+            width: 100%;
+            height: 52px;
+            text-align: center;
+            letter-spacing: 0.35em;
+            font-size: 24px;
+            font-weight: 700;
+            font-family: "JetBrains Mono", monospace;
+            border: 2px solid var(--border-strong);
+            border-radius: 8px;
+            background: var(--panel-raised);
+            color: var(--text);
+            outline: none;
+            transition: border-color 150ms ease, box-shadow 150ms ease;
+        }
+        .otp-input:focus {
+            border-color: #0284c7;
+            box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.2);
+        }
+        .secret-box {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 8px 12px;
+            background: var(--panel-raised);
+            border: 1px dashed var(--border-strong);
+            border-radius: 6px;
+            font-family: "JetBrains Mono", monospace;
+            font-size: 12px;
+            color: var(--accent);
+            word-break: break-all;
+        }
+        .copy-btn {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--muted);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            flex-shrink: 0;
+            transition: all 150ms ease;
+        }
+        .copy-btn:hover {
+            color: var(--text);
+            border-color: var(--border-strong);
+            background: var(--panel);
+        }
+        .app-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            background: var(--panel-raised);
+            border: 1px solid var(--border);
+            font-size: 11px;
+            color: var(--muted);
+        }
+    </style>
 </head>
-<body class="bg-slate-100 min-h-screen">
-    <main class="max-w-lg mx-auto py-16 px-6">
-        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-8">
-            <h1 class="text-2xl font-semibold text-slate-900 mb-2">Two-factor authentication</h1>
-            <p class="text-slate-600 mb-6">Secure your account with a time-based code from an authenticator app (Google Authenticator, Authy, 1Password).</p>
-
-            <div id="mfaStatus" class="mb-4 text-sm text-slate-500">Checking sign-in…</div>
-
-            <div id="enrollPanel" class="hidden">
-                <ol class="list-decimal list-inside space-y-3 text-slate-700 mb-6">
-                    <li>Open your authenticator app.</li>
-                    <li>Choose <strong>Add account</strong> and scan the QR code, or enter the setup key manually.</li>
-                    <li>Type the 6-digit code shown in the app below.</li>
-                </ol>
-                <div class="flex justify-center mb-4"><div id="qrBox" class="p-3 bg-white border border-slate-200 rounded-lg"></div></div>
-                <div class="mb-4">
-                    <label class="block text-xs font-medium text-slate-500 mb-1">Manual setup key</label>
-                    <code id="secretKey" class="block break-all bg-slate-50 border border-slate-200 rounded px-3 py-2 text-sm text-slate-800 select-all"></code>
+<body class="bg-zinc-950 text-zinc-100 antialiased h-screen overflow-y-auto">
+    <div class="mfa-page-container">
+        <!-- App Header matching Dashboard/Admin -->
+        <header class="app-header">
+            <div class="flex min-w-0 items-center gap-3">
+                <a href="./index.html" class="brand-mark" aria-label="Return to operations dashboard">
+                    <img class="brand-logo" src="./assets/Screenshot%202026-09-04%20111147.png" alt="The Center for Wooden Boats" style="width: 140px; height: 38px;">
+                </a>
+                <div class="hidden h-7 w-px bg-zinc-700 sm:block"></div>
+                <div class="min-w-0">
+                    <h1 class="truncate text-sm font-semibold uppercase tracking-wide sm:text-base">Security Verification</h1>
+                    <p class="truncate text-[11px] text-zinc-400">Two-Factor Authentication Setup</p>
                 </div>
-                <div class="mb-4">
-                    <label for="totpCode" class="block text-sm font-medium text-slate-700 mb-1">6-digit code</label>
-                    <input id="totpCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="\d{6}"
-                        class="w-full border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="123456">
+            </div>
+            <div class="flex items-center gap-2">
+                <div id="mfaConnection" class="connection-pill" role="status"><span class="status-dot"></span><span class="hidden sm:inline">Checking</span></div>
+                <a href="./index.html" class="header-command"><i data-lucide="map" class="h-4 w-4"></i><span class="hidden sm:inline">Operations</span></a>
+            </div>
+        </header>
+
+        <main class="flex-1 flex items-center justify-center p-4 sm:p-6 my-auto">
+            <div class="mfa-card p-6 sm:p-8">
+                <!-- Header Icon & Title -->
+                <div class="text-center mb-6">
+                    <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-sky-500/10 text-sky-400 border border-sky-500/20 mb-3">
+                        <i data-lucide="shield-check" class="h-7 w-7"></i>
+                    </div>
+                    <h1 class="text-xl sm:text-2xl font-bold tracking-tight text-white">Two-Factor Authentication</h1>
+                    <p class="text-xs sm:text-sm text-zinc-400 mt-1 max-w-sm mx-auto">
+                        Protect CWB operational data and renter information with time-based verification.
+                    </p>
                 </div>
-                <button id="verifyButton" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg px-4 py-2">Verify and enable</button>
-                <p id="enrollMessage" class="mt-3 text-sm text-red-600"></p>
-            </div>
 
-            <div id="donePanel" class="hidden text-center">
-                <p class="text-green-700 font-medium mb-4">Two-factor authentication is enabled.</p>
-                <a href="./index.html" class="text-blue-600 hover:underline">Continue to the dashboard →</a>
-            </div>
+                <!-- Status alert -->
+                <div id="mfaStatus" class="mb-4 text-xs sm:text-sm text-center text-zinc-400">Checking account status…</div>
 
-            <div id="signinPanel" class="hidden text-center">
-                <p class="text-slate-600 mb-4">You need to sign in before enabling two-factor authentication.</p>
-                <a href="./index.html" class="text-blue-600 hover:underline">Go to sign in →</a>
-            </div>
+                <!-- 1. ENROLL PANEL -->
+                <div id="enrollPanel" class="hidden space-y-6">
+                    <!-- Step 1: Open App -->
+                    <div class="step-item">
+                        <span class="step-badge">1</span>
+                        <div class="step-text flex-1">
+                            <strong>Open your Authenticator App</strong>
+                            <small>Compatible with standard TOTP apps:</small>
+                            <div class="flex flex-wrap gap-1.5 mt-2">
+                                <span class="app-pill"><i data-lucide="smartphone" class="h-3 w-3"></i> Google Authenticator</span>
+                                <span class="app-pill"><i data-lucide="shield" class="h-3 w-3"></i> Microsoft Auth</span>
+                                <span class="app-pill"><i data-lucide="key" class="h-3 w-3"></i> 1Password</span>
+                                <span class="app-pill">Authy</span>
+                            </div>
+                        </div>
+                    </div>
 
-            <div id="reauthPanel" class="hidden text-center">
-                <p class="text-slate-600 mb-4">For your security, confirm your identity again before adding a second factor.</p>
-                <button id="reauthButton" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg px-4 py-2">Confirm identity</button>
-                <p id="reauthMessage" class="mt-3 text-sm text-red-600"></p>
+                    <!-- Step 2: Scan QR or copy key -->
+                    <div class="step-item">
+                        <span class="step-badge">2</span>
+                        <div class="step-text flex-1">
+                            <strong>Scan the QR code</strong>
+                            <small>In your authenticator, choose <em>Add Account</em> or <em>Scan QR</em>.</small>
+                            
+                            <div class="flex flex-col sm:flex-row items-center gap-4 mt-3 p-3 bg-zinc-900 border border-zinc-800 rounded-lg">
+                                <div id="qrBox" class="p-2 bg-white rounded-md flex-shrink-0">
+                                    <!-- QR rendered here -->
+                                </div>
+                                <div class="min-w-0 flex-1 space-y-2 text-left">
+                                    <span class="text-[11px] font-semibold uppercase text-zinc-400 tracking-wider">Cannot scan? Manual setup key:</span>
+                                    <div class="secret-box">
+                                        <code id="secretKey" class="truncate"></code>
+                                        <button id="copySecretBtn" class="copy-btn" type="button" title="Copy key">
+                                            <i data-lucide="copy" class="h-3.5 w-3.5"></i>
+                                            <span>Copy</span>
+                                        </button>
+                                    </div>
+                                    <span class="text-[11px] text-zinc-500 block">Account: <span id="mfaAccountEmail" class="text-zinc-300"></span></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Step 3: Enter Code -->
+                    <div class="step-item">
+                        <span class="step-badge">3</span>
+                        <div class="step-text flex-1">
+                            <strong>Enter the 6-digit code</strong>
+                            <small>Type the temporary code generated by your authenticator:</small>
+                            <div class="mt-3">
+                                <input id="totpCode" class="otp-input" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="\d{6}" placeholder="······" autofocus>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Submit Button -->
+                    <div>
+                        <button id="verifyButton" class="w-full primary-button py-3 text-sm h-11 flex justify-center items-center gap-2">
+                            <i data-lucide="check-circle" class="h-4 w-4"></i>
+                            <span>Verify Code & Enable 2FA</span>
+                        </button>
+                        <p id="enrollMessage" class="mt-2 text-xs text-center text-red-400 font-medium"></p>
+                    </div>
+                </div>
+
+                <!-- 2. DONE PANEL -->
+                <div id="donePanel" class="hidden text-center py-6 space-y-4">
+                    <div class="w-16 h-16 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 mx-auto flex items-center justify-center">
+                        <i data-lucide="badge-check" class="h-8 w-8"></i>
+                    </div>
+                    <div>
+                        <h2 class="text-lg font-bold text-white">Two-Factor Authentication Active</h2>
+                        <p class="text-xs sm:text-sm text-zinc-400 mt-1 max-w-sm mx-auto">
+                            Your account is fully secured with TOTP verification.
+                        </p>
+                    </div>
+                    <div class="pt-2 flex flex-col sm:flex-row gap-2 justify-center">
+                        <a href="./index.html" class="primary-button py-2.5 px-6 text-sm">
+                            <i data-lucide="map" class="h-4 w-4"></i>
+                            <span>Go to Operations Dashboard</span>
+                        </a>
+                        <a href="./admin.html" class="secondary-button py-2.5 px-6 text-sm">
+                            <i data-lucide="settings" class="h-4 w-4"></i>
+                            <span>Fleet Admin</span>
+                        </a>
+                    </div>
+                </div>
+
+                <!-- 3. SIGN-IN REQUIRED PANEL -->
+                <div id="signinPanel" class="hidden text-center py-6 space-y-4">
+                    <div class="w-14 h-14 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 mx-auto flex items-center justify-center">
+                        <i data-lucide="lock" class="h-6 w-6"></i>
+                    </div>
+                    <div>
+                        <h2 class="text-lg font-semibold text-white">Sign-in Required</h2>
+                        <p class="text-xs sm:text-sm text-zinc-400 mt-1">Please sign in with your CWB account before setting up two-factor authentication.</p>
+                    </div>
+                    <div>
+                        <a href="./index.html" class="primary-button py-2.5 px-6 text-sm inline-flex">
+                            <i data-lucide="log-in" class="h-4 w-4"></i>
+                            <span>Go to Sign In</span>
+                        </a>
+                    </div>
+                </div>
+
+                <!-- 4. REAUTHENTICATION REQUIRED PANEL -->
+                <div id="reauthPanel" class="hidden text-center py-6 space-y-4">
+                    <div class="w-14 h-14 rounded-full bg-sky-500/10 text-sky-400 border border-sky-500/20 mx-auto flex items-center justify-center">
+                        <i data-lucide="fingerprint" class="h-7 w-7"></i>
+                    </div>
+                    <div>
+                        <h2 class="text-lg font-semibold text-white">Security Confirmation</h2>
+                        <p class="text-xs sm:text-sm text-zinc-400 mt-1 max-w-sm mx-auto">
+                            To ensure account security, please re-confirm your identity with Google before enrolling a new authenticator.
+                        </p>
+                    </div>
+                    <div>
+                        <button id="reauthButton" class="primary-button py-2.5 px-6 text-sm">
+                            <i data-lucide="check" class="h-4 w-4"></i>
+                            <span>Confirm Identity</span>
+                        </button>
+                        <p id="reauthMessage" class="mt-2 text-xs text-red-400"></p>
+                    </div>
+                </div>
             </div>
-        </div>
-    </main>
+        </main>
+
+        <footer class="status-bar flex justify-between px-4 py-2 border-t border-zinc-800 text-[11px] text-zinc-500">
+            <span>The Center for Wooden Boats · Fleet Operations</span>
+            <span>Identity & Access Management</span>
+        </footer>
+    </div>
+
     <script type="module" src="./mfa.js"></script>
 </body>
 </html>
+
