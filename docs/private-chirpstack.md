@@ -135,10 +135,11 @@ Configure ChirpStack's HTTP integration to use JSON. ChirpStack appends an `even
 }
 ```
 
-Generate one random high-entropy webhook token. Store it as:
+Generate one random high-entropy webhook token. Store it in GCP with:
 
-* GCP Secret Manager secret `chirpstack-webhook-token`, exposed to the function as `CHIRPSTACK_WEBHOOK_TOKEN`.
-* Wix Secrets Manager secret `chirpstackWebhookToken`.
+```bash
+firebase functions:secrets:set CHIRPSTACK_WEBHOOK_TOKEN
+```
 
 Configure the ChirpStack HTTP integration to send this header:
 
@@ -146,7 +147,13 @@ Configure the ChirpStack HTTP integration to send this header:
 X-CWB-Webhook-Token: YOUR_SECRET_VALUE
 ```
 
-The public adapters reject requests without the matching token. Do not put the token in Git or in the endpoint URL.
+The GCP endpoint rejects requests without the matching token. It accepts only POST requests with JSON bodies up to 64 KiB, throttles authenticated requests per function instance, and uses a device-scoped event receipt to make retries replay-safe. Per-instance throttling is a best-effort application control, not global volumetric protection. Do not put the token in Git or in the endpoint URL.
+
+Enable Firestore TTL for the replay receipts before production use:
+
+```bash
+gcloud firestore fields ttls update expires_at --collection-group=_ingest_receipts --enable-ttl
+```
 
 For the POC, set the endpoint to the deployed GCP function URL. After CWB approves Wix, replace that endpoint with:
 

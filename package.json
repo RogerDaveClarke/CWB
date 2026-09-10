@@ -2,13 +2,25 @@
   "name": "cwb-rowboat-tracker",
   "private": true,
   "scripts": {
-    "dev": "node tools/dev-server.mjs"
+    "dev": "node tools/dev-server.mjs",
+    "privacy-gate": "node tools/privacy-gate/privacy-gate.mjs",
+    "security-gate": "node tools/security-gate/security-gate.mjs",
+    "security:cloud": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/security-gate/verify-gcp-posture.ps1",
+    "deploy": "node tools/deploy.mjs"
   },
   "devDependencies": {
     "tailwindcss": "^3.4.17"
   },
   "dependencies": {
+    "firebase-admin": "^14.3.0",
     "leaflet": "^1.9.4",
     "lucide": "^0.468.0"
+  },
+  "overrides": {
+    "firebase-admin": "^14.3.0",
+    "gaxios": "^7.3.1",
+    "uuid": "^11.0.0",
+    "retry-request": "^8.0.4",
+    "teeny-request": "^10.1.4"
   }
 }

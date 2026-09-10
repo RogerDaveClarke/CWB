@@ -97,6 +97,19 @@ The variance classifier is gated by a 55 m circular geofence centered on the CWB
 
 The repository has one platform-neutral firmware implementation. GCP and Wix are deployment adapters for the same versioned telemetry protocol and remain together on `main`.
 
+### Security and Privacy Gates
+
+Configure the repository hook once per clone and install Gitleaks on the development machine:
+
+```bash
+git config core.hooksPath .githooks
+git hook run pre-commit
+```
+
+The pre-commit gate scans staged content for secrets, runs the deterministic privacy checks against the staged snapshot, verifies every GCP Cloud Function against `tools/security-gate/gcp-endpoints.json`, runs Cloud Function authentication tests when that source changes, rejects anonymous Firestore reads, checks staged first-party JavaScript syntax, audits staged npm dependency trees, and runs PlatformIO static analysis against staged firmware changes. The firmware check uses the project virtual environment on Windows or POSIX.
+
+All callable functions require Firebase Authentication; privileged functions and direct Firestore administration also require the admin claim and TOTP. The public ChirpStack transport endpoint requires its Secret Manager token and enforces POST JSON requests, a 64 KiB body limit, per-instance throttling, and replay-safe writes. Pull requests run these authentication tests alongside the privacy gate, JavaScript and firmware checks, production dependency audits, and CodeQL. Dependabot monitors both npm projects and GitHub Actions. In GitHub, enable **Secret scanning** and **Push protection** under **Settings > Security > Code security and analysis**, then require the Project Security Gate and CodeQL checks in the `main` branch protection rules. Repository settings cannot be enabled by a committed workflow file.
+
 ### Telemetry Protocol Version 1
 
 Protocol version 1 is a packed 16-byte little-endian frame:
@@ -130,12 +143,15 @@ The GCP adapter stores the version as `protocol_version`. The Wix adapter stores
 * Flash onto your **Seeed Studio XIAO SAMD21** board framework.
 
 ### 2. GCP Cloud Functions Setup
-* Open terminal inside `platforms/gcp/cloud-ingest`.
-* Run deployment parameters:
+* Create the webhook secret through Firebase and enable expiry for replay receipts:
   ```bash
-  gcloud functions deploy telemetryIngest --runtime nodejs18 --trigger-http --allow-unauthenticated --set-secrets CHIRPSTACK_WEBHOOK_TOKEN=chirpstack-webhook-token:latest
+  firebase functions:secrets:set CHIRPSTACK_WEBHOOK_TOKEN
+  firebase functions:secrets:set CHIRPSTACK_API_TOKEN
+  gcloud firestore fields ttls update expires_at --collection-group=_ingest_receipts --enable-ttl
   ```
-* Copy the generated function webhook target URL and paste it as an HTTP integration webhook within your LoRaWAN server network dashboard.
+* Create `production.env` from `production.template` and fill in the production Firebase settings. Deployment fails closed when that file is absent.
+* Run `npm run deploy -- --all` from the repository root. This runs the privacy and endpoint-security gates plus Cloud Function authentication tests before deploying hosting, Firestore rules, and all Cloud Functions.
+* Configure ChirpStack to use the deployed `telemetryIngest` URL with `Content-Type: application/json` and the `X-CWB-Webhook-Token` header. The function is network-reachable so ChirpStack can call it, but requests without the matching secret are rejected.
 
 ### 3. Frontend Map Initialization
 * Open `platforms/gcp/frontend/index.html` and replace the `firebaseConfig` object dictionary elements with your web target data properties from your Firebase Console.
@@ -211,9 +227,10 @@ allow those optional fields to be written.
 
 #### 4.3 `last_ping` and `boats/{DevEUI}/history/{autoId}`
 
-`last_ping` has this decoded telemetry shape. While `tracking_enabled` is true,
-the ingest function appends the same shape to the boat's `history`
-subcollection.
+While `tracking_enabled` is true, `last_ping` has this decoded telemetry shape
+and the ingest function writes the same shape to the boat's `history`
+subcollection. When tracking is disabled, `last_ping` omits `latitude` and
+`longitude` but retains non-location operational telemetry.
 
 | Field | Type | Meaning |
 | :--- | :--- | :--- |
@@ -300,7 +317,7 @@ Dock staff run rentals from the operations dashboard. Each row carries a toggle 
 
 **Check out** captures the renter name and party size, sets `availability_status` to `rented`, and sets `tracking_enabled` to `true`. The ingest function appends a GPS breadcrumb to `boats/{DevEUI}/history` only while that flag is true, so idle boats never accumulate a location trail.
 
-**Check in** is the privacy boundary. In one operation the dashboard:
+**Check in** is the privacy boundary. The dashboard workflow:
 
 1. Writes a pseudonymous record to `rental_history` containing only the device ID, boat name, check-out time, check-in time, duration, and passenger count.
 2. Deletes every document in `boats/{DevEUI}/history`, destroying the journey trail.

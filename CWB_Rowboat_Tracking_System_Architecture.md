@@ -301,6 +301,7 @@ firmware/                     canonical tracker firmware (PlatformIO)
 platforms/gcp/                cloud-ingest, firestore.rules, frontend
 platforms/wix/                Velo backend and frontend
 tools/privacy-gate/           build-time privacy checker
+tools/security-gate/          GCP endpoint authentication inventory and gate
 docs/                         ChirpStack runbook, privacy review
 .github/                      agent, skill, CI workflow
 ```
@@ -315,10 +316,10 @@ platform branches are deliberately avoided so the shared protocol cannot drift.
 ```bash
 pio run --project-dir firmware          # privacy gate runs first
 node tools/privacy-gate/privacy-gate.mjs
-gcloud functions deploy telemetryIngest --runtime nodejs18 --trigger-http \
-  --allow-unauthenticated \
-  --set-secrets CHIRPSTACK_WEBHOOK_TOKEN=chirpstack-webhook-token:latest
-firebase deploy --only hosting
+node tools/security-gate/security-gate.mjs
+firebase functions:secrets:set CHIRPSTACK_WEBHOOK_TOKEN
+gcloud firestore fields ttls update expires_at --collection-group=_ingest_receipts --enable-ttl
+npm run deploy -- --all
 ```
 
 The frontend falls back to seeded demo data when `firebaseConfig` is

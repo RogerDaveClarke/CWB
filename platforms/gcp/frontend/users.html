@@ -3,90 +3,239 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Account administration - CWB</title>
+    <meta name="color-scheme" content="dark light">
+    <title>CWB Account Administration</title>
     <link rel="stylesheet" href="./vendor/tailwind.css">
+    <link rel="stylesheet" href="./dashboard.css">
     <link rel="stylesheet" href="./admin.css">
     <script src="./vendor/lucide/lucide.js" defer></script>
 </head>
-<body class="bg-slate-100 min-h-screen">
-    <header class="bg-white border-b border-slate-200">
-        <div class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-            <div>
-                <h1 class="text-xl font-semibold text-slate-900">Account administration</h1>
-                <p class="text-sm text-slate-500">Manage staff and volunteer access, roles, and two-factor authentication.</p>
-            </div>
-            <div class="flex items-center gap-3">
-                <span id="usersConnection" class="connection-pill"><span class="status-dot"></span><span class="hidden sm:inline">…</span></span>
-                <a href="./admin.html" class="text-sm text-blue-600 hover:underline">Fleet admin</a>
-                <a href="./index.html" class="text-sm text-blue-600 hover:underline">Dashboard</a>
-            </div>
-        </div>
-    </header>
-
-    <main class="max-w-6xl mx-auto px-6 py-8">
-        <div id="deniedPanel" class="hidden bg-white border border-slate-200 rounded-xl p-8 text-center">
-            <p class="text-slate-600">You do not have permission to manage accounts. Contact an administrator.</p>
-        </div>
-
-        <div id="adminPanel" class="hidden">
-            <section class="bg-white border border-slate-200 rounded-xl p-6 mb-6">
-                <h2 class="text-lg font-medium text-slate-900 mb-4">Invite user</h2>
-                <form id="inviteForm" class="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
-                    <div class="md:col-span-2">
-                        <label class="block text-xs font-medium text-slate-500 mb-1" for="inviteEmail">Email</label>
-                        <input id="inviteEmail" type="email" required class="w-full border border-slate-300 rounded-lg px-3 py-2" placeholder="name@example.org">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-medium text-slate-500 mb-1" for="inviteName">Name</label>
-                        <input id="inviteName" type="text" class="w-full border border-slate-300 rounded-lg px-3 py-2" placeholder="Full name">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-medium text-slate-500 mb-1" for="inviteRole">Role</label>
-                        <select id="inviteRole" class="w-full border border-slate-300 rounded-lg px-3 py-2">
-                            <option value="volunteer">Volunteer</option>
-                            <option value="staff">Staff</option>
-                            <option value="manager">Manager</option>
-                            <option value="admin">Admin</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-xs font-medium text-slate-500 mb-1" for="inviteFunction">Function</label>
-                        <select id="inviteFunction" class="w-full border border-slate-300 rounded-lg px-3 py-2">
-                            <option value="operations">Operations</option>
-                            <option value="administration">Administration</option>
-                        </select>
-                    </div>
-                    <div class="md:col-span-5 flex items-center gap-3">
-                        <button type="submit" id="inviteButton" class="bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg px-4 py-2">Send invite</button>
-                        <p id="inviteMessage" class="text-sm"></p>
-                    </div>
-                </form>
-            </section>
-
-            <section class="bg-white border border-slate-200 rounded-xl p-6">
-                <div class="flex items-center justify-between mb-4">
-                    <h2 class="text-lg font-medium text-slate-900">Users</h2>
-                    <button id="refreshButton" class="secondary-button" type="button">Refresh</button>
+<body class="h-screen overflow-hidden bg-zinc-950 text-zinc-100 antialiased">
+    <div class="flex h-full flex-col">
+        <!-- Application Header matching Operations & Fleet Admin -->
+        <header class="app-header">
+            <div class="flex min-w-0 items-center gap-3">
+                <a href="./index.html" aria-label="Return to operations dashboard">
+                    <img class="brand-logo" src="./assets/Screenshot%202026-09-04%20111147.png" alt="The Center for Wooden Boats">
+                </a>
+                <div class="min-w-0">
+                    <h1 class="brand-title truncate text-sm font-semibold uppercase tracking-wide sm:text-base">Account Administration</h1>
+                    <p class="truncate text-[11px] text-zinc-400">User roles, two-factor authentication, and security governance</p>
                 </div>
-                <div class="overflow-x-auto">
-                    <table class="min-w-full text-sm">
+            </div>
+            <div class="flex items-center gap-2">
+                <div id="usersConnection" class="connection-pill" role="status"><span class="status-dot"></span><span class="hidden sm:inline">Loading</span></div>
+                <a href="./admin.html" class="header-command"><i data-lucide="settings" class="h-4 w-4"></i><span class="hidden sm:inline">Fleet Admin</span></a>
+                <a href="./history.html" class="header-command"><i data-lucide="history" class="h-4 w-4"></i><span class="hidden sm:inline">History</span></a>
+                <a href="./index.html" class="header-command"><i data-lucide="map" class="h-4 w-4"></i><span class="hidden sm:inline">Operations</span></a>
+                <button id="authActionButton" class="header-command" type="button"><i data-lucide="log-in" class="h-4 w-4"></i><span>Sign in</span></button>
+            </div>
+        </header>
+
+        <!-- Main Workspace -->
+        <main class="admin-workspace">
+            <!-- Access Denied / Non-Admin Fallback -->
+            <div id="deniedPanel" class="hidden flex-1 flex items-center justify-center p-6 text-center">
+                <div class="max-w-md p-8 rounded-xl border border-zinc-800 bg-zinc-900 shadow-2xl">
+                    <div class="inline-flex items-center justify-center w-12 h-12 rounded-full bg-red-500/10 text-red-400 border border-red-500/20 mb-4">
+                        <i data-lucide="shield-alert" class="h-6 w-6"></i>
+                    </div>
+                    <h2 class="text-lg font-bold text-white mb-2">Access Restricted</h2>
+                    <p id="deniedText" class="text-sm text-zinc-400 mb-6">Administrator privileges and two-factor authentication are required to manage accounts.</p>
+                    <div class="flex justify-center gap-3">
+                        <a href="./mfa.html" class="primary-button"><i data-lucide="shield-check" class="h-4 w-4"></i>Setup 2FA</a>
+                        <a href="./index.html" class="secondary-button"><i data-lucide="map" class="h-4 w-4"></i>Operations</a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Admin Console Interface -->
+            <section id="adminPanel" class="admin-content with-kpis hidden" aria-label="Account administration">
+                <!-- KPI Metrics Strip -->
+                <div class="kpi-strip">
+                    <div class="kpi-card">
+                        <span id="kpiTotalUsers" class="kpi-value text-white">0</span>
+                        <span class="kpi-label">Total Accounts</span>
+                    </div>
+                    <div class="kpi-card">
+                        <span id="kpiActiveUsers" class="kpi-value text-emerald-400">0</span>
+                        <span class="kpi-label">Active Users</span>
+                    </div>
+                    <div class="kpi-card">
+                        <span id="kpiMfaEnrolled" class="kpi-value text-sky-400">0</span>
+                        <span class="kpi-label">2FA Enrolled</span>
+                    </div>
+                    <div class="kpi-card">
+                        <span id="kpiSuspendedUsers" class="kpi-value text-red-400">0</span>
+                        <span class="kpi-label">Suspended</span>
+                    </div>
+                </div>
+
+                <!-- Filters & Actions -->
+                <div class="admin-toolbar">
+                    <div class="admin-actions">
+                        <label class="year-control">
+                            <span>Role filter</span>
+                            <select id="roleFilter" aria-label="Role filter">
+                                <option value="all">All Roles</option>
+                                <option value="admin">Admin</option>
+                                <option value="manager">Manager</option>
+                                <option value="staff">Staff</option>
+                                <option value="volunteer">Volunteer</option>
+                            </select>
+                        </label>
+                        <label class="year-control">
+                            <span>Status filter</span>
+                            <select id="statusFilter" aria-label="Status filter">
+                                <option value="all">All Status</option>
+                                <option value="active">Active</option>
+                                <option value="suspended">Suspended</option>
+                            </select>
+                        </label>
+                        <label class="search-field">
+                            <i data-lucide="search" class="h-4 w-4"></i>
+                            <span class="sr-only">Search users</span>
+                            <input id="userSearch" type="search" placeholder="Search by name, email, or address" autocomplete="off">
+                        </label>
+                    </div>
+                    <div class="admin-actions">
+                        <button id="refreshUsersButton" class="secondary-button" type="button" title="Refresh user list">
+                            <i data-lucide="refresh-cw" class="h-4 w-4"></i>
+                            <span class="hidden sm:inline">Refresh</span>
+                        </button>
+                        <button id="addUserButton" class="primary-button" type="button">
+                            <i data-lucide="user-plus" class="h-4 w-4"></i>
+                            <span>Add User</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Users Table -->
+                <div class="admin-table-shell">
+                    <table class="admin-table">
                         <thead>
-                            <tr class="text-left text-slate-500 border-b border-slate-200">
-                                <th class="py-2 pr-4">Name</th>
-                                <th class="py-2 pr-4">Email</th>
-                                <th class="py-2 pr-4">Role</th>
-                                <th class="py-2 pr-4">Function</th>
-                                <th class="py-2 pr-4">2FA</th>
-                                <th class="py-2 pr-4">Status</th>
-                                <th class="py-2 pr-4 text-right">Actions</th>
+                            <tr>
+                                <th>Full name</th>
+                                <th>Email address</th>
+                                <th>Physical address</th>
+                                <th>Role</th>
+                                <th>Function level</th>
+                                <th>2FA</th>
+                                <th>Logins</th>
+                                <th>Status</th>
+                                <th class="text-right"><span class="sr-only">Actions</span></th>
                             </tr>
                         </thead>
-                        <tbody id="usersTableBody"></tbody>
+                        <tbody id="usersTableBody">
+                            <tr><td colspan="9" class="empty-cell">Loading CWB accounts…</td></tr>
+                        </tbody>
                     </table>
                 </div>
+
+                <!-- Footer Summary -->
+                <div class="admin-footer">
+                    <span id="usersCount">0 accounts</span>
+                    <span>Admin changes apply immediately to active sessions and Firestore access.</span>
+                </div>
             </section>
-        </div>
-    </main>
+        </main>
+    </div>
+
+    <!-- Drawer Backdrop -->
+    <div id="drawerBackdrop" class="drawer-backdrop hidden"></div>
+
+    <!-- User Edit/Create Slide-out Drawer -->
+    <aside id="userDrawer" class="boat-drawer" aria-labelledby="drawerTitle" aria-hidden="true">
+        <form id="userForm" class="drawer-form">
+            <div class="drawer-header">
+                <div>
+                    <p class="eyebrow">Account Configuration</p>
+                    <h2 id="drawerTitle">Add User</h2>
+                </div>
+                <button id="closeDrawerButton" class="icon-button" type="button" title="Close editor" aria-label="Close editor">
+                    <i data-lucide="x" class="h-4 w-4"></i>
+                </button>
+            </div>
+
+            <div id="formMessage" class="form-message hidden" role="alert"></div>
+
+            <fieldset class="form-section">
+                <legend>Identity & Contact</legend>
+                <div class="form-grid two-columns">
+                    <label>
+                        <span>Email address</span>
+                        <input id="userEmail" name="userEmail" type="email" placeholder="name@example.org" required>
+                        <small id="emailHelp">Used for sign-in and invitation.</small>
+                    </label>
+                    <label>
+                        <span>Full name</span>
+                        <input id="userDisplayName" name="userDisplayName" type="text" maxlength="80" placeholder="Captain Jane Doe" required>
+                    </label>
+                </div>
+                <div class="form-grid" style="margin-top: 10px;">
+                    <label>
+                        <span>Physical address</span>
+                        <input id="userAddress" name="userAddress" type="text" maxlength="150" placeholder="1010 Valley St, Seattle, WA 98109">
+                        <small>Residential or operational mailing address on record.</small>
+                    </label>
+                </div>
+            </fieldset>
+
+            <fieldset class="form-section">
+                <legend>Access & Governance</legend>
+                <div class="form-grid two-columns">
+                    <label>
+                        <span>System Role</span>
+                        <select id="userRole" name="userRole" required>
+                            <option value="volunteer">Volunteer (Operations only)</option>
+                            <option value="staff" selected>Staff (Check-in/out, dock)</option>
+                            <option value="manager">Manager (Fleet / Reports)</option>
+                            <option value="admin">Admin (Full administrative & security)</option>
+                        </select>
+                        <small>Determines access boundaries and data classification.</small>
+                    </label>
+                    <label>
+                        <span>Function Level</span>
+                        <select id="userFunctionLevel" name="userFunctionLevel" required>
+                            <option value="operations" selected>Operations (Livery & Dock)</option>
+                            <option value="administration">Administration (Fleet & Management)</option>
+                        </select>
+                        <small>Operational dock focus or administrative management.</small>
+                    </label>
+                </div>
+            </fieldset>
+
+            <fieldset id="securitySection" class="form-section">
+                <legend>Security & Session Info</legend>
+                <div class="text-xs text-zinc-400 space-y-2 mt-2">
+                    <div class="flex justify-between py-1 border-b border-zinc-800">
+                        <span class="text-zinc-500">2FA Status:</span>
+                        <span id="drawerMfaStatus" class="font-medium text-zinc-200">Not enrolled</span>
+                    </div>
+                    <div class="flex justify-between py-1 border-b border-zinc-800">
+                        <span class="text-zinc-500">Total Logins:</span>
+                        <span id="drawerLoginCount" class="font-mono text-zinc-200">0</span>
+                    </div>
+                    <div class="flex justify-between py-1">
+                        <span class="text-zinc-500">Last Sign-in:</span>
+                        <span id="drawerLastLogin" class="font-mono text-zinc-200">Never</span>
+                    </div>
+                </div>
+            </fieldset>
+
+            <div class="drawer-actions">
+                <button id="deleteUserButton" class="danger-button hidden" type="button">
+                    <i data-lucide="trash-2" class="h-4 w-4"></i>
+                    <span>Delete User</span>
+                </button>
+                <button id="cancelButton" class="secondary-button" type="button">Cancel</button>
+                <button id="saveUserButton" class="primary-button" type="submit">
+                    <i data-lucide="save" class="h-4 w-4"></i>
+                    <span>Save User</span>
+                </button>
+            </div>
+        </form>
+    </aside>
 
     <script type="module" src="./users.js"></script>
 </body>

@@ -1,0 +1,54 @@
+# Center for Wooden Boats (CWB) Discovery Workbook
+### Driven by Human-Centered Design Thinking Principles
+
+This workbook uses Design Thinking to map real-world lake experiences, operational edge cases, and fleet management scenarios into our digital dashboard logic. Please fill out the canvases below by thinking about daily operations, common headaches, and unexpected water scenarios (like severe weather, late boats, or structural wear).
+
+---
+
+## Section 1: The Core Personas
+When thinking about a scenario, try to anchor it around one of these key individuals:
+*   **The Dock Attendant (Operations)**: Needs real-time visibility, timing accuracy, and safety safeguards.
+*   **The Boatwright/Volunteer (Maintenance)**: Needs hull impact data and predictive battery notifications.
+*   **The Fleet Rental Visitor (End-User)**: Needs seamless checkout speeds, waitlist updates, and safety.
+*   **The CWB Executive / Board (Business)**: Needs zero cloud overhead ($0.00 continuing costs) and fleet asset longevity.
+
+---
+
+## Section 2: The "As-Is" vs. "To-Be" Scenario Canvas
+*Copy and paste this blank canvas for as many distinct operational scenarios or "what-ifs" as you can think of!*
+
+### Scenario Entry #[X]: [Give the Scenario a Short Name]
+*   **The Actor**: "When **[Select Persona]** is trying to accomplish **[Specific Operational Goal]**..."
+*   **The As-Is State (Current Pain Point)**: "Right now, the blind spot, barrier, or risk is..."
+*   **The To-Be State (The Ideal Experience)**: "In a perfect world, our dashboard or backend tracking system would automatically detect this and..."
+*   **The Core Value**: "This matters to CWB because it directly improves **[Select: Safety / Turnaround Speed / Asset Preservation / Guest Delight]**."
+
+---
+
+## Section 3: Reference Inspirations (Examples of Completed Canvases)
+
+Here are four examples showing how everyday lake events translate directly into the system's hardware and cloud logic:
+
+###  Reference Example A: Structural Hull Care & High-Energy Impacts
+*   **The Actor**: When **The Boatwright/Volunteer** is trying to preserve the lifespan of historic wooden hulls...
+*   **The As-Is State**: A rowboat collides heavily with a floating log or a concrete pier out on the lake. Staff never find out unless structural cracking or leaking appears weeks later.
+*   **The To-Be State**: The on-boat accelerometer detects a sudden, massive kinetic force spike outside normal wave tolerances. The dashboard immediately flags that specific boat row in **Orange** as an "Inspection Required" warning.
+*   **The Core Value**: Asset Preservation. Catching minor structural seam strains early before they become catastrophic compromises.
+
+### Reference Example B: Severe Weather & Shipping Channel Encroachment
+*   **The Actor**: When **The Dock Attendant** is trying to ensure the physical safety of visitors on the water...
+*   **The As-Is State**: Sudden northern crosswinds push an inexperienced family into the commercial shipping lanes or out of bounds. The rental desk has no idea until the boat is hours late.
+*   **The To-Be State**: The system tracks the live GPS node crossing a pre-set **virtual geofenced perimeter** around the Lake Union rental zone. It instantly places a flashing **Red Warning Icon** on the main office map.
+*   **The Core Value**: Safety. Giving dock staff a proactive heads-up to launch a chase boat before an emergency occurs.
+
+###  Reference Example C: Automated Waitlist Turnarounds
+*   **The Actor**: When **The Fleet Rental Visitor** is waiting on a busy weekend for an available boat...
+*   **The As-Is State**: A boat returns early, but sits at a far dock un-cleared because the front desk team is trapped in a massive physical line of new customers.
+*   **The To-Be State**: The mooring algorithm registers that the boat has been in a tightly bound, low-energy "Tied Up at Dock" state for over 2 minutes. The backend updates the Wix CMS collection, automatically triggering an SMS alert to the next waitlisted customer: *"Rowboat Martha has landed and is being prepped for you!"*
+*   **The Core Value**: Guest Delight & Turnaround Speed. Eliminating lobby line bottlenecks.
+
+### Reference Example D: Zero-Solar Maintenance Awareness
+*   **The Actor**: When **The Dock Attendant** is managing daily fleet readiness without solar chargers...
+*   **The As-Is State**: An on-boat tracking box runs out of battery unexpectedly in the middle of a rental, rendering the vessel completely invisible on the map.
+*   **The To-Be State**: The tracker's internal voltage monitor notices the NiCad cells hit their **4.2V low-power safety threshold**. It automatically flags a low-power status byte in its standard LoRaWAN message, displaying a "Needs Battery Swap" badge on the console 2 weeks before the system actually dies.
+*   **The Core Value**: Operations & Asset Security. Keeping tracking hardware continuously online.

@@ -100,7 +100,7 @@ function startDemo() {
 async function startFirebase() {
     if (!isConfigValid()) {
         setConnection("error", "Not configured");
-        showAuthModal("signIn");
+        showAuthModal("error", { message: "Firebase configuration missing. Please contact administrator." });
         return;
     }
     try {

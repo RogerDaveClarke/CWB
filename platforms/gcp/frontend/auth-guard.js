@@ -8,8 +8,9 @@ export const ROLES = ["admin", "manager", "staff", "volunteer"];
 export const FUNCTION_LEVELS = ["operations", "administration"];
 
 const SDK = "https://www.gstatic.com/firebasejs/10.7.1";
-let appModule, authModule, firestoreModule, functionsModule;
-let cachedApp = null, cachedAuth = null;
+let appModule, appCheckModule, authModule, firestoreModule, functionsModule;
+let modulesPromise = null;
+let cachedApp = null, cachedAuth = null, cachedDb = null, cachedFunctions = null;
 let pendingMfaResolver = null;
 
 export function isConfigValid() {
@@ -17,34 +18,60 @@ export function isConfigValid() {
 }
 
 async function loadModules() {
-    if (!appModule) {
-        appModule = await import(`${SDK}/firebase-app.js`);
-        authModule = await import(`${SDK}/firebase-auth.js`);
-        firestoreModule = await import(`${SDK}/firebase-firestore.js`);
-        functionsModule = await import(`${SDK}/firebase-functions.js`);
+    // Fetched in parallel: these are four independent requests to gstatic and
+    // awaiting them one at a time serialised the whole page start-up.
+    if (!modulesPromise) {
+        modulesPromise = Promise.all([
+            import(`${SDK}/firebase-app.js`),
+            import(`${SDK}/firebase-app-check.js`),
+            import(`${SDK}/firebase-auth.js`),
+            import(`${SDK}/firebase-firestore.js`),
+            import(`${SDK}/firebase-functions.js`)
+        ]).then(([app, appCheck, auth, firestore, functions]) => {
+            appModule = app;
+            appCheckModule = appCheck;
+            authModule = auth;
+            firestoreModule = firestore;
+            functionsModule = functions;
+            return { appModule, appCheckModule, authModule, firestoreModule, functionsModule };
+        }).catch((error) => {
+            modulesPromise = null;
+            throw error;
+        });
     }
-    return { appModule, authModule, firestoreModule, functionsModule };
+    return modulesPromise;
 }
 
 export async function getFirebase() {
-    const { appModule, authModule, firestoreModule, functionsModule } = await loadModules();
+    const { appModule, appCheckModule, authModule, firestoreModule, functionsModule } = await loadModules();
     if (!cachedApp) {
         cachedApp = appModule.initializeApp(firebaseConfig);
+        if (!firebaseConfig.appCheckSiteKey) {
+            throw new Error("Firebase App Check is not configured.");
+        }
+        appCheckModule.initializeAppCheck(cachedApp, {
+            provider: new appCheckModule.ReCaptchaEnterpriseProvider(firebaseConfig.appCheckSiteKey),
+            isTokenAutoRefreshEnabled: true
+        });
         cachedAuth = authModule.getAuth(cachedApp);
+        cachedDb = firestoreModule.getFirestore(cachedApp);
+        cachedFunctions = functionsModule.getFunctions(cachedApp, firebaseConfig.region || "us-west1");
     }
     return {
         app: cachedApp,
         auth: cachedAuth,
-        db: firestoreModule.getFirestore(cachedApp),
-        functions: functionsModule.getFunctions(cachedApp),
-        appModule, authModule, firestoreModule, functionsModule
+        db: cachedDb,
+        functions: cachedFunctions,
+        appModule, appCheckModule, authModule, firestoreModule, functionsModule
     };
 }
 
-export function tokenHasMfa(tokenResult) {
+export function tokenHasMfa(tokenResult, user) {
     const claims = tokenResult?.claims || {};
-    return claims.firebase?.sign_in_second_factor === "totp"
+    const hasClaim = claims.firebase?.sign_in_second_factor === "totp"
         || claims.firebase?.second_factor_identifier != null;
+    const hasEnrolled = (user?.multiFactor?.enrolledFactors || []).length > 0;
+    return hasClaim || hasEnrolled;
 }
 
 export function claimsFromToken(tokenResult) {
@@ -56,8 +83,12 @@ export function claimsFromToken(tokenResult) {
     };
 }
 
-export async function getEffectiveUserClaims(user, db, firestoreModule) {
-    let tokenResult = await user.getIdTokenResult(true);
+export async function getEffectiveUserClaims(user, db, firestoreModule, forceRefresh = false) {
+    // The cached ID token already carries the claims we need on the common
+    // path. Refreshing unconditionally added a token-service round-trip to
+    // every page load; initAuthGuard re-reads with forceRefresh only when the
+    // cached claims fail the page's requirements.
+    let tokenResult = await user.getIdTokenResult(forceRefresh);
     let claims = tokenResult.claims || {};
     let role = typeof claims.role === "string" ? claims.role : null;
     let functionLevel = typeof claims.functionLevel === "string" ? claims.functionLevel : null;
@@ -83,11 +114,11 @@ export async function getEffectiveUserClaims(user, db, firestoreModule) {
     };
 }
 
-export function satisfies(claims, tokenResult, spec = {}) {
+export function satisfies(claims, tokenResult, spec = {}, user = null) {
     if (spec.requireAdmin && !claims.isAdmin) return { ok: false, reason: "admin-required" };
     if (spec.roles && !spec.roles.includes(claims.role) && !claims.isAdmin) return { ok: false, reason: "role-required" };
     if (spec.functionLevels && !spec.functionLevels.includes(claims.functionLevel) && !claims.isAdmin) return { ok: false, reason: "function-required" };
-    if (spec.requireMfa && !tokenHasMfa(tokenResult)) return { ok: false, reason: "mfa-required" };
+    if (spec.requireMfa && !tokenHasMfa(tokenResult, user)) return { ok: false, reason: "mfa-required" };
     return { ok: true };
 }
 
@@ -360,7 +391,7 @@ function ensureAuthModal() {
                 <!-- Step: Pending Role Assignment -->
                 <div id="authStepPendingRole" class="cwb-auth-step cwb-hidden">
                     <div class="cwb-auth-info amber">
-                        Signed in as <strong id="authPendingEmail"></strong>.<br>Your account is pending role assignment by a CWB Administrator before you can access operations.
+                        Signed in as <strong id="authPendingEmail"></strong>.<br>Your account is pending role assignment by a CWB Administrator before you can access operations. Staff signing in with a verified @cwb.org account are granted access automatically.
                     </div>
                     <button id="authSignOutBtn1" class="cwb-auth-btn-secondary" type="button">Sign Out</button>
                 </div>
@@ -483,12 +514,27 @@ function showStep(stepName, details = {}) {
     }
 }
 
+// Users on the CWB staff domain are auto-provisioned a default role on first
+// sign-in via the claimDefaultRole callable. One attempt per user per page
+// load — a rejection means the account genuinely needs a manual invitation.
+const autoProvisionAttempted = new Set();
+
+async function tryAutoProvisionDefaultRole(user) {
+    if (autoProvisionAttempted.has(user.uid)) return false;
+    autoProvisionAttempted.add(user.uid);
+    try {
+        const { functions, functionsModule } = await getFirebase();
+        const result = await functionsModule.httpsCallable(functions, "claimDefaultRole")({});
+        return result.data?.granted === true || Boolean(result.data?.role);
+    } catch (error) {
+        console.info("Automatic role provisioning declined:", error.message);
+        return false;
+    }
+}
+
 // Main Guard initializer:
 // Auto-prompts sign-in / 2FA modal if user is not signed in or fails requirements.
 export async function initAuthGuard(spec, { onReady, onDenied, onSignedOut }) {
-    // Show modal immediately, before any async operations
-    showAuthModal("signIn");
-
     if (!isConfigValid()) {
         console.warn("Firebase config not valid, cannot authenticate");
         showAuthModal("error", { message: "Application not configured. Please contact administrator." });
@@ -496,7 +542,7 @@ export async function initAuthGuard(spec, { onReady, onDenied, onSignedOut }) {
     }
 
     try {
-        const { auth, authModule, db, firestoreModule } = await getFirebase();
+        const { auth, authModule, db, firestoreModule, functions } = await getFirebase();
         return authModule.onAuthStateChanged(auth, async (user) => {
             if (!user) {
                 showAuthModal("signIn");
@@ -504,19 +550,60 @@ export async function initAuthGuard(spec, { onReady, onDenied, onSignedOut }) {
                 return;
             }
 
-            const { tokenResult, claims } = await getEffectiveUserClaims(user, db, firestoreModule);
+            let { tokenResult, claims } = await getEffectiveUserClaims(user, db, firestoreModule);
+            let check = (!claims.isAdmin && !claims.role)
+                ? { ok: false, reason: "pending-role" }
+                : satisfies(claims, tokenResult, spec, user);
 
-            if (!claims.isAdmin && !claims.role) {
+            // A stale cached token is the most likely reason for a first-pass
+            // failure (claims were changed since the token was minted), so pay
+            // for the forced refresh only on that path.
+            if (!check.ok) {
+                ({ tokenResult, claims } = await getEffectiveUserClaims(user, db, firestoreModule, true));
+                check = (!claims.isAdmin && !claims.role)
+                    ? { ok: false, reason: "pending-role" }
+                    : satisfies(claims, tokenResult, spec, user);
+            }
+
+            if (check.reason === "pending-role") {
+                // No role anywhere — offer the domain auto-grant before parking
+                // the user on the pending screen.
+                if (await tryAutoProvisionDefaultRole(user)) {
+                    ({ tokenResult, claims } = await getEffectiveUserClaims(user, db, firestoreModule, true));
+                    check = (!claims.isAdmin && !claims.role)
+                        ? { ok: false, reason: "pending-role" }
+                        : satisfies(claims, tokenResult, spec, user);
+                }
+            }
+
+            if (check.reason === "pending-role") {
                 showAuthModal("pendingRole", { email: user.email });
                 onDenied?.("pending-role", user, claims);
                 return;
             }
 
-            const check = satisfies(claims, tokenResult, spec);
-
             if (check.ok) {
                 hideAuthModal();
-                onReady?.({ user, claims, tokenResult, db, functions: (await getFirebase()).functions });
+                // Record/increment login session in Firestore users collection.
+                // Deliberately not awaited: the page has everything it needs to
+                // start loading, and this write only feeds admin reporting.
+                try {
+                    const sessionKey = `cwb_logged_session_${user.uid}`;
+                    const lastSessionTime = sessionStorage.getItem(sessionKey);
+                    const now = Date.now();
+                    // Increment login count once per browser session or if 30+ mins since last recorded in session
+                    if (!lastSessionTime || (now - Number(lastSessionTime) > 30 * 60 * 1000)) {
+                        sessionStorage.setItem(sessionKey, String(now));
+                        const userDocRef = firestoreModule.doc(db, "users", user.uid);
+                        firestoreModule.setDoc(userDocRef, {
+                            lastLogin: new Date().toISOString(),
+                            loginCount: firestoreModule.increment(1)
+                        }, { merge: true }).catch((err) => console.warn("Could not record login metadata", err));
+                    }
+                } catch (err) {
+                    console.warn("Could not record login metadata", err);
+                }
+                onReady?.({ user, claims, tokenResult, db, functions });
             } else {
                 let msg = "Your account does not have permission to access this page.";
                 if (check.reason === "role-required") {

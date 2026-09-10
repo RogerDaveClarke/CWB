@@ -1,6 +1,6 @@
 import { firebaseConfig } from "./firebase-config.js";
-import { initAuthGuard, signOut, showAuthModal, isConfigValid } from "./auth-guard.js";
-import { addDoc, collection, deleteDoc, deleteField, doc, getDocs, limit, onSnapshot, orderBy, query, serverTimestamp, updateDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+import { getFirebase, initAuthGuard, signOut, showAuthModal, isConfigValid } from "./auth-guard.js";
+import { collection, deleteField, doc, limit, onSnapshot, orderBy, query, serverTimestamp, updateDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 const DOCK = { latitude: 47.62795, longitude: -122.33645 };
 const DOCK_GEOFENCE_METERS = 55;
@@ -328,24 +328,10 @@ async function checkInBoat(boat) {
         return;
     }
 
-    await addDoc(collection(state.db, "rental_history"), record);
-
     const historyUnsubscribe = state.historyUnsubscribes.get(boat.id);
     if (historyUnsubscribe) { historyUnsubscribe(); state.historyUnsubscribes.delete(boat.id); }
-    const trail = await getDocs(collection(state.db, "boats", boat.id, "history"));
-    await Promise.all(trail.docs.map(entry => deleteDoc(entry.ref)));
-
-    await updateDoc(doc(state.db, "boats", boat.id), {
-        availability_status: "available",
-        tracking_enabled: false,
-        booked: false,
-        booked_by: deleteField(),
-        renter_type: deleteField(),
-        passenger_count: deleteField(),
-        time_out: deleteField(),
-        actual_time_back: deleteField(),
-        rental_updated_at: serverTimestamp()
-    });
+    const { functions, functionsModule } = await getFirebase();
+    await functionsModule.httpsCallable(functions, "checkInBoat")({ boatId: boat.id });
 }
 
 async function checkInFromTable(boatId, button) {
@@ -394,7 +380,7 @@ function openRentalModal(boatId) {
          <label><span>Phone number</span><input id="renterPhone" type="tel" maxlength="30" placeholder="(206) 555-0123" autocomplete="tel" inputmode="tel"></label>
         <label><span>Number of passengers</span><input id="renterPassengers" type="number" min="1" max="6" required></label>
         <label class="nda-confirmation"><input id="renterNdaSigned" type="checkbox" required><span>I confirm the renter has signed the NDA.</span></label>
-         <div class="privacy-note"><i data-lucide="shield" class="h-4 w-4 shrink-0"></i><span>Location tracking starts now and runs only until check-in. The renter name and route are erased automatically when the boat returns.</span></div>`;
+         <div class="privacy-note"><i data-lucide="shield" class="h-4 w-4 shrink-0"></i><span>Location tracking starts now and runs only while the boat is checked out. A successful staff check-in removes the renter name and stored route.</span></div>`;
     elements.rentalBody.querySelectorAll("input, select").forEach(input => input.addEventListener("input", updateCheckoutEligibility));
     document.getElementById("renterType").addEventListener("change", updateCheckoutEligibility);
     document.getElementById("renterNdaSigned").addEventListener("change", updateCheckoutEligibility);
@@ -439,9 +425,6 @@ async function submitRentalAction(event) {
 }
 
 async function startFirebase() {
-    // Always show auth modal first, regardless of config state
-    showAuthModal("signIn");
-    
     if (!isConfigValid()) {
         console.error("Firebase config is invalid:", firebaseConfig);
         setConnection("error", "Configuration error");
@@ -449,7 +432,7 @@ async function startFirebase() {
         return;
     }
     try {
-        await initAuthGuard({ roles: ["admin", "manager", "staff", "volunteer"], functionLevels: ["operations"] }, {
+        await initAuthGuard({ roles: ["admin", "manager", "staff", "volunteer"], functionLevels: ["operations"], requireMfa: true }, {
             onReady: ({ user, claims, db }) => {
                 state.db = db;
                 state.user = user;

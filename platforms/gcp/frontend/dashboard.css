@@ -103,7 +103,6 @@ tbody tr.alert-row { box-shadow: inset 3px 0 #ef4444; }
 .splitter:hover, .splitter.dragging { background: color-mix(in srgb, var(--bg) 55%, #0ea5e9); }
 .splitter-grip { position: absolute; left: 50%; top: 50%; width: 19px; height: 38px; transform: translate(-50%, -50%); display: grid; place-items: center; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--panel-raised); color: var(--subtle); }
 .map-pane { position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; background-color: #111827; background-image: linear-gradient(rgb(125 211 252 / .1) 1px, transparent 1px), linear-gradient(90deg, rgb(125 211 252 / .1) 1px, transparent 1px); background-size: 64px 64px; }
-#map.leaflet-container { background-color: #111827; background-image: url("./assets/lake-union-map.png"); background-position: center; background-repeat: no-repeat; background-size: cover; }
 .map-title, .map-legend, .map-detail { position: absolute; z-index: 500; border: 1px solid rgb(63 63 70 / .9); background: rgb(12 12 15 / .9); color: #fafafa; box-shadow: 0 8px 24px rgb(0 0 0 / .25); backdrop-filter: blur(10px); }
 .map-title { top: 12px; left: 54px; padding: 8px 11px; border-radius: 4px; display: flex; flex-direction: column; font-size: 12px; }
 .map-legend { top: 12px; right: 58px; min-height: 34px; padding: 0 10px; border-radius: 4px; display: flex; align-items: center; gap: 11px; font-size: 10px; }
@@ -117,7 +116,6 @@ tbody tr.alert-row { box-shadow: inset 3px 0 #ef4444; }
 .rescue-button { width: 100%; min-height: 32px; margin-top: 10px; border: 1px solid #dc2626; border-radius: 4px; background: #991b1b; color: #fef2f2; font-size: 11px; font-weight: 700; pointer-events: auto; }
 .rescue-button:hover:not(:disabled) { border-color: #f87171; background: #b91c1c; }
 .rescue-button:disabled { cursor: default; border-color: var(--border); background: var(--panel-raised); color: var(--muted); }
-.map-attribution { position: absolute; z-index: 500; right: 12px; bottom: 12px; padding: 3px 5px; border: 1px solid rgb(63 63 70 / .9); border-radius: 3px; background: rgb(12 12 15 / .88); color: #d4d4d8; font-size: 9px; }
 .boat-marker { position: relative; width: 38px; height: 38px; display: grid; place-items: center; border: 2px solid white; border-radius: 50%; background: #0ea5e9; color: white; box-shadow: 0 4px 14px rgb(0 0 0 / .42); }
 .boat-marker.rented { background: #16a34a; }
 .boat-marker.warning { background: #dc2626; animation: warning-pulse 1.35s ease-out infinite; }

@@ -9,7 +9,7 @@
     "platforms/gcp/frontend/index.html"
   ],
   "retention": {
-    "gcpTrailMaxDays": null,
+    "gcpTrailMaxDays": 2,
     "gcpPurgeImplementation": "platforms/gcp/cloud-ingest/retention.js"
   },
   "rules": {
@@ -65,21 +65,15 @@
       "title": "No privacy policy link on a page that collects personal information",
       "statutes": ["RCW 19.373.020(1)(b) homepage link"],
       "remediation": "Publish a consumer health data privacy policy and link it from every page that collects personal information."
+    },
+    "P009": {
+      "severity": "error",
+      "title": "Staff account store (users collection) must never be world-readable",
+      "statutes": ["RCW 19.373.050(1)(a) access restriction", "RCW 19.255.010 breach notification exposure", "FTC Act s5, 15 U.S.C. 45"],
+      "remediation": "Keep the users match block restricted to self-or-admin reads and Admin-SDK-only role writes in firestore.rules; never add 'allow read: if true' to /users."
     }
   },
   "acknowledged": [
-    {
-      "id": "P001",
-      "owner": "CWB technical lead",
-      "reason": "Pre-existing POC design: the public dashboard reads Firestore unauthenticated. Closing this requires splitting renter identity into an admin-only collection and adding auth to the public map, which is a product decision.",
-      "reviewBy": "2026-09-23"
-    },
-    {
-      "id": "P006",
-      "owner": "CWB technical lead",
-      "reason": "Trails are erased at check-in. An abandoned rental that is never checked in retains a trail indefinitely; a scheduled purge is planned alongside the GCP-to-Wix decision.",
-      "reviewBy": "2026-09-23"
-    },
     {
       "id": "P007",
       "owner": "CWB operations lead",

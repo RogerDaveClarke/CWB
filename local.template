@@ -1,0 +1,21 @@
+# =============================================================================
+# CWB Rowboat Tracker - LOCAL development template
+# COMMIT this file. Copy to local.env and fill in values. Keys only, no secrets.
+# =============================================================================
+
+GCP_ACCOUNT=
+GCP_REGION=us-west1
+FIREBASE_PROJECT_ID=
+FIREBASE_API_KEY=
+FIREBASE_AUTH_DOMAIN=
+FIREBASE_STORAGE_BUCKET=
+FIREBASE_MESSAGING_SENDER_ID=
+FIREBASE_APP_ID=
+CHIRPSTACK_WEBHOOK_TOKEN=
+GOOGLE_APPLICATION_CREDENTIALS=
+BOOTSTRAP_ADMIN_EMAIL=
+PORT=
+
+# --- LoRaWAN gateway API (pushBoatConfig downlinks) ---
+CHIRPSTACK_API_URL=
+CHIRPSTACK_API_TOKEN=

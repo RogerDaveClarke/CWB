@@ -1,0 +1,23 @@
+{
+  "displayName": "CWB Security Control Changes",
+  "combiner": "OR",
+  "enabled": true,
+  "documentation": {
+    "content": "Verify the actor and approved change record. Follow docs/security/incident-response.md for an unexpected IAM, service-account, function, or secret change.",
+    "mimeType": "text/markdown"
+  },
+  "alertStrategy": {
+    "autoClose": "604800s",
+    "notificationRateLimit": {
+      "period": "300s"
+    }
+  },
+  "conditions": [
+    {
+      "displayName": "IAM, function, or secret control changed",
+      "conditionMatchedLog": {
+        "filter": "logName:\"cloudaudit.googleapis.com\" AND (protoPayload.methodName:\"SetIamPolicy\" OR protoPayload.methodName:\"UpdateFunction\" OR protoPayload.methodName:\"CreateFunction\" OR protoPayload.methodName:\"DeleteFunction\" OR protoPayload.methodName:\"AddSecretVersion\" OR protoPayload.methodName:\"DestroySecretVersion\")"
+      }
+    }
+  ]
+}

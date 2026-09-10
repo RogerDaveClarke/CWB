@@ -1,20 +1,33 @@
 const { initializeApp } = require('firebase-admin/app');
-const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+const { createHash } = require('node:crypto');
+const { getFirestore, FieldValue, Timestamp } = require('firebase-admin/firestore');
+const { setGlobalOptions } = require('firebase-functions/v2');
+const { onRequest } = require('firebase-functions/v2/https');
+const { authenticateWebhookRequest } = require('./webhookAuth');
+const { logSecurityEvent } = require('./securityLog');
+
+setGlobalOptions({ region: 'us-west1' });
 
 initializeApp();
 const db = getFirestore();
 const SUPPORTED_PROTOCOL_VERSION = 1;
 const V1_PAYLOAD_LENGTH = 16;
 
-exports.telemetryIngest = async (req, res) => {
+exports.telemetryIngest = onRequest({
+  secrets: ['CHIRPSTACK_WEBHOOK_TOKEN'],
+  serviceAccount: 'cwb-telemetry-ingest@cwb-boat-operations-c50dd.iam.gserviceaccount.com',
+  timeoutSeconds: 30,
+  maxInstances: 10
+}, async (req, res) => {
   try {
     const expectedToken = process.env.CHIRPSTACK_WEBHOOK_TOKEN;
-    if (!expectedToken) {
-      console.error('CHIRPSTACK_WEBHOOK_TOKEN is not configured.');
-      return res.status(500).send('Webhook authentication is not configured.');
-    }
-    if (req.get('x-cwb-webhook-token') !== expectedToken) {
-      return res.status(403).send('Forbidden.');
+    const authentication = authenticateWebhookRequest(req, expectedToken);
+    if (!authentication.ok) {
+      logSecurityEvent('webhook_rejected', { status: authentication.status }, 'WARNING');
+      for (const [name, value] of Object.entries(authentication.headers)) {
+        res.set(name, value);
+      }
+      return res.status(authentication.status).send(authentication.message);
     }
     if (req.query.event && req.query.event !== 'up') {
       return res.status(204).send();
@@ -32,6 +45,9 @@ exports.telemetryIngest = async (req, res) => {
     if (!boatId || !base64Payload) {
       return res.status(400).send('Missing device identity or base64 uplink data.');
     }
+    if (!/^[0-9a-f]{16}$/i.test(boatId)) {
+      return res.status(400).send('Invalid device identity.');
+    }
 
     const buffer = Buffer.from(base64Payload, 'base64');
 
@@ -41,7 +57,7 @@ exports.telemetryIngest = async (req, res) => {
 
     const protocolVersion = buffer.readUInt8(0);
     if (protocolVersion !== SUPPORTED_PROTOCOL_VERSION) {
-      return res.status(400).send(`Unsupported telemetry protocol version: ${protocolVersion}.`);
+      return res.status(400).send('Unsupported telemetry protocol version.');
     }
     if (buffer.length !== V1_PAYLOAD_LENGTH) {
       return res.status(400).send('Malformed version 1 packet layout size.');
@@ -83,16 +99,52 @@ exports.telemetryIngest = async (req, res) => {
       timestamp: FieldValue.serverTimestamp()
     };
 
+    const eventIdentity = integrationData.deduplicationId
+      || integrationData.deduplication_id
+      || req.rawBody
+      || JSON.stringify(integrationData);
+    const eventId = createHash('sha256')
+      .update(boatId.toLowerCase())
+      .update('\0')
+      .update(String(req.query.event || 'up'))
+      .update('\0')
+      .update(eventIdentity)
+      .digest('hex');
     const trackingRef = db.collection('boats').doc(boatId);
-    await trackingRef.set({
-      last_ping: pingPayload,
-      device_id: boatId
-    }, { merge: true });
+    const receiptRef = db.collection('_ingest_receipts').doc(eventId);
 
-    // GPS breadcrumbs are only retained while a boat is checked out to a renter.
-    const boatSnapshot = await trackingRef.get();
-    if (boatSnapshot.get('tracking_enabled') === true) {
-      await trackingRef.collection('history').add(pingPayload);
+    const result = await db.runTransaction(async (transaction) => {
+      const [receiptSnapshot, boatSnapshot] = await Promise.all([
+        transaction.get(receiptRef),
+        transaction.get(trackingRef)
+      ]);
+      if (receiptSnapshot.exists) return 'duplicate';
+      if (!boatSnapshot.exists) return 'unknown-device';
+
+      const trackingEnabled = boatSnapshot.get('tracking_enabled') === true;
+      const { latitude, longitude, ...operationalPingPayload } = pingPayload;
+      transaction.update(trackingRef, {
+        last_ping: trackingEnabled ? pingPayload : operationalPingPayload,
+        device_id: boatId
+      });
+
+      // A deterministic document ID makes an authenticated retry idempotent.
+      if (trackingEnabled) {
+        transaction.set(trackingRef.collection('history').doc(eventId), pingPayload);
+      }
+      transaction.create(receiptRef, {
+        received_at: FieldValue.serverTimestamp(),
+        expires_at: Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000)
+      });
+      return 'accepted';
+    });
+
+    if (result === 'unknown-device') {
+      logSecurityEvent('webhook_unknown_device', {}, 'WARNING');
+      return res.status(404).send('Unknown device.');
+    }
+    if (result === 'duplicate') {
+      return res.status(200).send('Duplicate telemetry event ignored.');
     }
 
     return res.status(200).send('Telemetry parsed and updated successfully.');
@@ -100,14 +152,25 @@ exports.telemetryIngest = async (req, res) => {
     console.error('Ingest Engine Fault Error:', error);
     return res.status(500).send('Internal Data Stream Interrupted.');
   }
-};
+});
 
 // Account administration callable functions (inviteUser, setUserRole, etc.).
 // Exported alongside the telemetry ingest HTTP function.
 const userAdmin = require('./userAdmin');
 exports.inviteUser = userAdmin.inviteUser;
+exports.updateUserProfile = userAdmin.updateUserProfile;
 exports.setUserRole = userAdmin.setUserRole;
 exports.disableUser = userAdmin.disableUser;
 exports.enableUser = userAdmin.enableUser;
+exports.deleteUser = userAdmin.deleteUser;
 exports.resetUserMfa = userAdmin.resetUserMfa;
 exports.listUsers = userAdmin.listUsers;
+exports.claimDefaultRole = userAdmin.claimDefaultRole;
+exports.checkInBoat = userAdmin.checkInBoat;
+
+// Boat tracker configuration downlinks via the ChirpStack LoRaWAN gateway.
+const boatConfig = require('./boatConfig');
+exports.pushBoatConfig = boatConfig.pushBoatConfig;
+
+const retention = require('./retention');
+exports.purgeExpiredTrails = retention.purgeExpiredTrails;

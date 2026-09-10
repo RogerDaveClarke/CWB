@@ -1,8 +1,31 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
     function isAdmin() {
-      return request.auth != null && request.auth.token.admin == true;
+      return request.auth != null
+        && (request.auth.token.get('admin', false) == true
+          || request.auth.token.get('role', '') == 'admin')
+        && request.auth.token.get('firebase', {}).get('sign_in_second_factor', '') == 'totp';
+    }
+
+    function hasOperationsAccess() {
+      return isAdmin()
+        || (isSignedIn()
+          && request.auth.token.get('role', '') in ['manager', 'staff', 'volunteer']
+          && request.auth.token.get('functionLevel', '') == 'operations');
+    }
+
+    function hasMfaOperationsAccess() {
+      return request.auth != null
+        && (request.auth.token.get('admin', false) == true
+          || request.auth.token.get('role', '') == 'admin'
+          || (request.auth.token.get('role', '') in ['manager', 'staff']
+            && request.auth.token.get('functionLevel', '') == 'operations'))
+        && request.auth.token.get('firebase', {}).get('sign_in_second_factor', '') == 'totp';
     }
 
     function validBoatConfiguration(boatId) {
@@ -61,11 +84,11 @@ service cloud.firestore {
     }
 
     match /boats/{boatId} {
-      allow read: if true;
+      allow read: if hasOperationsAccess();
       allow create: if isAdmin()
         && request.resource.data.keys().hasOnly(configurationKeys())
         && validBoatConfiguration(boatId);
-      allow update: if isAdmin()
+      allow update: if hasMfaOperationsAccess()
         && (
           (request.resource.data.diff(resource.data).affectedKeys().hasOnly(configurationKeys())
             && validBoatConfiguration(boatId))
@@ -77,15 +100,27 @@ service cloud.firestore {
         || resource.data.tracking_enabled == false);
       
       match /history/{document} {
-        allow read: if true;
+        allow read: if hasOperationsAccess();
         allow create, update: if false;
         // Staff erase the journey trail at check-in.
-        allow delete: if isAdmin();
+        allow delete: if hasMfaOperationsAccess();
       }
     }
 
+    // Fleet-wide operational settings (e.g. the annual livery closure window).
+    // Contains no personal data; read by dashboards and by pushBoatConfig when
+    // building tracker downlinks.
+    match /fleet_config/{settingId} {
+      allow read: if hasOperationsAccess();
+      allow write: if isAdmin()
+        && request.resource.data.keys().hasOnly(['closure_enabled', 'closure_start', 'closure_end', 'updated_at'])
+        && request.resource.data.closure_enabled is bool
+        && request.resource.data.closure_start is string
+        && request.resource.data.closure_end is string;
+    }
+
     match /boat_types/{typeId} {
-      allow read: if true;
+      allow read: if hasOperationsAccess();
       allow create, update: if isAdmin()
         && request.resource.data.keys().hasOnly(['name'])
         && request.resource.data.name is string;
@@ -93,7 +128,7 @@ service cloud.firestore {
     }
 
     match /rental_history/{recordId} {
-      allow read: if true;
+      allow read: if hasOperationsAccess();
       // Restricting keys keeps renter identity and coordinates out of the retained log.
       allow create: if isAdmin()
         && request.resource.data.keys().hasOnly([
@@ -109,6 +144,26 @@ service cloud.firestore {
         && request.resource.data.vessel_name is string
         && request.resource.data.duration_minutes is int;
       allow update, delete: if false;
+    }
+
+    // Staff / volunteer account records. This is a NEW category of personal data
+    // (staff identity), so it is never world-readable.
+    match /users/{userId} {
+      // A signed-in user may read their own record; only admins list others.
+      allow get: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow list: if isAdmin();
+      // Role and functionLevel are managed exclusively by the Admin SDK through
+        // callable Cloud Functions. Clients may create/update their basic login tracking metadata,
+        // but may never set role, functionLevel, status, or admin.
+      allow create: if isSignedIn()
+        && request.auth.uid == userId
+        && !request.resource.data.keys().hasAny(['role', 'functionLevel', 'status', 'admin'])
+        && request.resource.data.email is string;
+        allow update: if isAdmin()
+          || (isSignedIn()
+              && request.auth.uid == userId
+              && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'functionLevel', 'status', 'admin']));
+        allow delete: if false;
     }
   }
 }

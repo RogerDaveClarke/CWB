@@ -1,0 +1,17 @@
+{
+  "endpoints": [
+    { "name": "telemetryIngest", "file": "platforms/gcp/cloud-ingest/index.js", "trigger": "onRequest", "authentication": "webhook-secret", "guard": "authenticateWebhookRequest(req, expectedToken)" },
+    { "name": "claimDefaultRole", "file": "platforms/gcp/cloud-ingest/userAdmin.js", "trigger": "onCall", "authentication": "firebase-user", "guard": "requireAuthenticatedUser(request)" },
+    { "name": "inviteUser", "file": "platforms/gcp/cloud-ingest/userAdmin.js", "trigger": "onCall", "authentication": "firebase-mfa-admin", "guard": "requireMfaAdmin(request)" },
+    { "name": "updateUserProfile", "file": "platforms/gcp/cloud-ingest/userAdmin.js", "trigger": "onCall", "authentication": "firebase-mfa-admin", "guard": "requireMfaAdmin(request)" },
+    { "name": "setUserRole", "file": "platforms/gcp/cloud-ingest/userAdmin.js", "trigger": "onCall", "authentication": "firebase-mfa-admin", "guard": "requireMfaAdmin(request)" },
+    { "name": "disableUser", "file": "platforms/gcp/cloud-ingest/userAdmin.js", "trigger": "onCall", "authentication": "firebase-mfa-admin", "guard": "requireMfaAdmin(request)" },
+    { "name": "enableUser", "file": "platforms/gcp/cloud-ingest/userAdmin.js", "trigger": "onCall", "authentication": "firebase-mfa-admin", "guard": "requireMfaAdmin(request)" },
+    { "name": "deleteUser", "file": "platforms/gcp/cloud-ingest/userAdmin.js", "trigger": "onCall", "authentication": "firebase-mfa-admin", "guard": "requireMfaAdmin(request)" },
+    { "name": "resetUserMfa", "file": "platforms/gcp/cloud-ingest/userAdmin.js", "trigger": "onCall", "authentication": "firebase-mfa-admin", "guard": "requireMfaAdmin(request)" },
+    { "name": "listUsers", "file": "platforms/gcp/cloud-ingest/userAdmin.js", "trigger": "onCall", "authentication": "firebase-mfa-admin", "guard": "requireMfaAdmin(request)" },
+    { "name": "checkInBoat", "file": "platforms/gcp/cloud-ingest/userAdmin.js", "trigger": "onCall", "authentication": "firebase-mfa-operations", "guard": "requireMfaOperations(request)" },
+    { "name": "pushBoatConfig", "file": "platforms/gcp/cloud-ingest/boatConfig.js", "trigger": "onCall", "authentication": "firebase-mfa-admin", "guard": "requireMfaAdmin(request)" },
+    { "name": "purgeExpiredTrails", "file": "platforms/gcp/cloud-ingest/retention.js", "trigger": "onSchedule", "authentication": "cloud-scheduler-iam", "guard": null }
+  ]
+}

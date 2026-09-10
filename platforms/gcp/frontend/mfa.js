@@ -106,6 +106,17 @@ async function startEnrollment(user) {
 
             try {
                 await completeTotpEnrollment(user, secret, code);
+                // Mirror enrollment into the user's profile doc so admin views
+                // can show 2FA state without querying Firebase Auth.
+                try {
+                    const { db, firestoreModule } = await getFirebase();
+                    firestoreModule.setDoc(firestoreModule.doc(db, "users", user.uid), {
+                        email: user.email || "",
+                        mfaEnrolled: true
+                    }, { merge: true }).catch((err) => console.warn("Could not mirror 2FA state", err));
+                } catch (err) {
+                    console.warn("Could not mirror 2FA state", err);
+                }
                 statusEl.textContent = "";
                 setConnection("live", "Enrolled");
                 show(donePanel);

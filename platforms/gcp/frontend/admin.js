@@ -1,14 +1,18 @@
 import { firebaseConfig } from "./firebase-config.js";
-import { initAuthGuard, signOut, showAuthModal, isConfigValid } from "./auth-guard.js";
+import { initAuthGuard, signOut, showAuthModal, isConfigValid, getFirebase } from "./auth-guard.js";
 import { collection, deleteDoc, doc, getDocs, onSnapshot, serverTimestamp, setDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 const DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 const DAY_LABELS = { monday: "Monday", tuesday: "Tuesday", wednesday: "Wednesday", thursday: "Thursday", friday: "Friday", saturday: "Saturday", sunday: "Sunday" };
+const MONTH_LABELS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const DEMO_STORAGE_KEY = "cwbAdminBoatConfiguration";
 const DEMO_BOAT_TYPES_KEY = "cwbAdminBoatTypes";
+const DEMO_CLOSURE_KEY = "cwbAdminLiveryClosure";
 const DEFAULT_BOAT_TYPES = ["Row", "Capri 22", "Capri 14"];
+// Livery closes for the winter off-season; recurring annually (month-day).
+const DEFAULT_CLOSURE = { enabled: true, start: "10-15", end: "03-15" };
 const currentYear = new Date().getFullYear();
-const state = { boats: new Map(), boatTypes: [], editingId: null, search: "", year: currentYear, demoMode: false, auth: null, db: null, user: null, isAdmin: false };
+const state = { boats: new Map(), boatTypes: [], closure: { ...DEFAULT_CLOSURE }, editingId: null, search: "", year: currentYear, demoMode: false, auth: null, db: null, user: null, isAdmin: false };
 
 const elements = {
     tableBody: document.getElementById("adminTableBody"),
@@ -24,8 +28,6 @@ const elements = {
     deviceId: document.getElementById("deviceId"),
     vesselName: document.getElementById("vesselName"),
     boatType: document.getElementById("boatType"),
-    newBoatType: document.getElementById("newBoatType"),
-    boatTypeList: document.getElementById("boatTypeList"),
     availability: document.getElementById("availability"),
     reportIntervalMinutes: document.getElementById("reportIntervalMinutes"),
     scheduleYear: document.getElementById("scheduleYear"),
@@ -33,7 +35,14 @@ const elements = {
     seasonEnd: document.getElementById("seasonEnd"),
     weeklySchedule: document.getElementById("weeklySchedule"),
     deleteButton: document.getElementById("deleteBoatButton"),
-    saveButton: document.getElementById("saveButton")
+    saveButton: document.getElementById("saveButton"),
+    updateTrackerButton: document.getElementById("updateTrackerButton"),
+    closureEnabled: document.getElementById("closureEnabled"),
+    closureStartMonth: document.getElementById("closureStartMonth"),
+    closureStartDay: document.getElementById("closureStartDay"),
+    closureEndMonth: document.getElementById("closureEndMonth"),
+    closureEndDay: document.getElementById("closureEndDay"),
+    saveClosureButton: document.getElementById("saveClosureButton")
 };
 
 function escapeHtml(value) {
@@ -66,11 +75,8 @@ function renderBoatTypeOptions(selectedType) {
     elements.boatType.innerHTML = types.map(type => `<option value="${escapeHtml(type.name)}" ${type.name === selected ? "selected" : ""}>${escapeHtml(type.name)}</option>`).join("");
 }
 
-function renderBoatTypes() {
-    renderBoatTypeOptions();
-    elements.boatTypeList.innerHTML = state.boatTypes.map(type => `<div class="boat-type-row" data-type-id="${escapeHtml(type.id)}"><input class="boat-type-name" type="text" value="${escapeHtml(type.name)}" maxlength="40" aria-label="Boat type name"><button class="secondary-button save-boat-type" type="button">Save</button><button class="danger-button delete-boat-type" type="button">Remove</button></div>`).join("") || `<p class="no-boat-types">Add a boat type before creating a boat.</p>`;
-    elements.boatTypeList.querySelectorAll(".save-boat-type").forEach(button => button.addEventListener("click", () => updateBoatType(button.closest(".boat-type-row").dataset.typeId)));
-    elements.boatTypeList.querySelectorAll(".delete-boat-type").forEach(button => button.addEventListener("click", () => deleteBoatType(button.closest(".boat-type-row").dataset.typeId)));
+function selectedBoatType() {
+    return state.boatTypes.find(type => type.name === elements.boatType.value) || null;
 }
 
 function validateBoatTypeName(name, exceptId = "") {
@@ -81,50 +87,152 @@ function validateBoatTypeName(name, exceptId = "") {
 }
 
 async function addBoatType() {
-    const name = elements.newBoatType.value;
+    const name = window.prompt("New boat type name:");
+    if (name == null) return;
     const validationError = validateBoatTypeName(name);
     if (validationError) { showMessage(validationError); return; }
     const type = { id: crypto.randomUUID(), name: name.trim() };
-    if (!state.demoMode) await setDoc(doc(state.db, "boat_types", type.id), { name: type.name });
-    state.boatTypes.push(type);
-    if (state.demoMode) saveDemoBoatTypes();
-    elements.newBoatType.value = "";
-    renderBoatTypes();
+    try {
+        if (!state.demoMode) await setDoc(doc(state.db, "boat_types", type.id), { name: type.name });
+        state.boatTypes.push(type);
+        if (state.demoMode) saveDemoBoatTypes();
+        renderBoatTypeOptions(type.name);
+        hideMessage();
+    } catch (error) {
+        console.error("Unable to add boat type", error);
+        showMessage(error.message || "Unable to add boat type.");
+    }
 }
 
-async function updateBoatType(id) {
-    const type = state.boatTypes.find(item => item.id === id);
-    const input = elements.boatTypeList.querySelector(`[data-type-id="${CSS.escape(id)}"] .boat-type-name`);
-    if (!type || !input) return;
-    const name = input.value.trim();
-    const validationError = validateBoatTypeName(name, id);
+async function renameBoatType() {
+    const type = selectedBoatType();
+    if (!type) { showMessage("Select a boat type to rename."); return; }
+    const name = window.prompt(`Rename boat type "${type.name}" to:`, type.name);
+    if (name == null || name.trim() === type.name) return;
+    const validationError = validateBoatTypeName(name, type.id);
     if (validationError) { showMessage(validationError); return; }
     const oldName = type.name;
-    type.name = name;
-    state.boats.forEach(boat => { if (boat.boatType === oldName) boat.boatType = name; });
-    if (state.demoMode) {
-        localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify([...state.boats.values()]));
-        saveDemoBoatTypes();
-    } else {
-        await setDoc(doc(state.db, "boat_types", id), { name });
-        await Promise.all([...state.boats.values()].filter(boat => boat.boatType === name).map(boat => setDoc(doc(state.db, "boats", boat.id), { boat_type: name, configuration_updated_at: serverTimestamp() }, { merge: true })));
+    const newName = name.trim();
+    try {
+        type.name = newName;
+        state.boats.forEach(boat => { if (boat.boatType === oldName) boat.boatType = newName; });
+        if (state.demoMode) {
+            localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify([...state.boats.values()]));
+            saveDemoBoatTypes();
+        } else {
+            await setDoc(doc(state.db, "boat_types", type.id), { name: newName });
+            await Promise.all([...state.boats.values()].filter(boat => boat.boatType === newName).map(boat => setDoc(doc(state.db, "boats", boat.id), { boat_type: newName, configuration_updated_at: serverTimestamp() }, { merge: true })));
+        }
+        renderTable();
+        renderBoatTypeOptions(newName);
+        hideMessage();
+    } catch (error) {
+        console.error("Unable to rename boat type", error);
+        showMessage(error.message || "Unable to rename boat type.");
     }
-    renderTable();
-    renderBoatTypes();
 }
 
-async function deleteBoatType(id) {
-    const type = state.boatTypes.find(item => item.id === id);
-    if (!type) return;
+async function removeBoatType() {
+    const type = selectedBoatType();
+    if (!type) { showMessage("Select a boat type to delete."); return; }
     if ([...state.boats.values()].some(boat => boat.boatType === type.name)) { showMessage(`Assign boats using ${type.name} to another type before removing it.`); return; }
-    if (!state.demoMode) await deleteDoc(doc(state.db, "boat_types", id));
-    state.boatTypes = state.boatTypes.filter(item => item.id !== id);
-    if (state.demoMode) saveDemoBoatTypes();
-    renderBoatTypes();
+    if (!window.confirm(`Delete boat type "${type.name}"?`)) return;
+    try {
+        if (!state.demoMode) await deleteDoc(doc(state.db, "boat_types", type.id));
+        state.boatTypes = state.boatTypes.filter(item => item.id !== type.id);
+        if (state.demoMode) saveDemoBoatTypes();
+        renderBoatTypeOptions(state.boatTypes[0]?.name || "");
+        hideMessage();
+    } catch (error) {
+        console.error("Unable to delete boat type", error);
+        showMessage(error.message || "Unable to delete boat type.");
+    }
 }
 
 function fullYearRange(year) {
     return { start: `${year}-01-01`, end: `${year}-12-31` };
+}
+
+// Device IDs are generated by the system, never typed by hand. 8 random bytes
+// rendered as 16 lowercase hex characters, matching the DevEUI format the
+// telemetry ingest keys on.
+function randomDeviceId() {
+    const bytes = new Uint8Array(8);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
+// ---- Livery closure (annual off-season, e.g. Oct 15 – Mar 15) ----
+
+function parseMonthDay(value, fallback) {
+    const match = /^(\d{2})-(\d{2})$/.exec(String(value || ""));
+    if (!match) return fallback;
+    const month = Number(match[1]), day = Number(match[2]);
+    if (month < 1 || month > 12 || day < 1 || day > 31) return fallback;
+    return { month, day };
+}
+
+function normalizeClosure(raw = {}) {
+    const start = parseMonthDay(raw.closure_start ?? raw.start, parseMonthDay(DEFAULT_CLOSURE.start));
+    const end = parseMonthDay(raw.closure_end ?? raw.end, parseMonthDay(DEFAULT_CLOSURE.end));
+    return {
+        enabled: (raw.closure_enabled ?? raw.enabled) !== false,
+        start: `${String(start.month).padStart(2, "0")}-${String(start.day).padStart(2, "0")}`,
+        end: `${String(end.month).padStart(2, "0")}-${String(end.day).padStart(2, "0")}`
+    };
+}
+
+function renderClosure() {
+    const start = parseMonthDay(state.closure.start, parseMonthDay(DEFAULT_CLOSURE.start));
+    const end = parseMonthDay(state.closure.end, parseMonthDay(DEFAULT_CLOSURE.end));
+    elements.closureEnabled.checked = state.closure.enabled;
+    elements.closureStartMonth.value = String(start.month);
+    elements.closureStartDay.value = String(start.day);
+    elements.closureEndMonth.value = String(end.month);
+    elements.closureEndDay.value = String(end.day);
+}
+
+function closureFromControls() {
+    const startMonth = Number(elements.closureStartMonth.value);
+    const startDay = Number(elements.closureStartDay.value);
+    const endMonth = Number(elements.closureEndMonth.value);
+    const endDay = Number(elements.closureEndDay.value);
+    const daysIn = month => [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1];
+    if (!Number.isInteger(startDay) || startDay < 1 || startDay > daysIn(startMonth)) return { error: `Closure start day must be 1–${daysIn(startMonth)} for ${MONTH_LABELS[startMonth - 1]}.` };
+    if (!Number.isInteger(endDay) || endDay < 1 || endDay > daysIn(endMonth)) return { error: `Closure end day must be 1–${daysIn(endMonth)} for ${MONTH_LABELS[endMonth - 1]}.` };
+    return {
+        closure: {
+            enabled: elements.closureEnabled.checked,
+            start: `${String(startMonth).padStart(2, "0")}-${String(startDay).padStart(2, "0")}`,
+            end: `${String(endMonth).padStart(2, "0")}-${String(endDay).padStart(2, "0")}`
+        }
+    };
+}
+
+async function saveClosure() {
+    const { closure, error } = closureFromControls();
+    if (error) { window.alert(error); return; }
+    elements.saveClosureButton.disabled = true;
+    try {
+        state.closure = closure;
+        if (state.demoMode) {
+            localStorage.setItem(DEMO_CLOSURE_KEY, JSON.stringify(closure));
+        } else {
+            if (!state.user || !state.isAdmin) throw new Error("Sign in with an Administrator account to save the livery closure.");
+            await setDoc(doc(state.db, "fleet_config", "livery"), {
+                closure_enabled: closure.enabled,
+                closure_start: closure.start,
+                closure_end: closure.end,
+                updated_at: serverTimestamp()
+            });
+        }
+        renderClosure();
+    } catch (error) {
+        console.error("Unable to save livery closure", error);
+        window.alert(error.message || "Unable to save livery closure.");
+    } finally {
+        elements.saveClosureButton.disabled = false;
+    }
 }
 
 function normalizeBoat(id, raw = {}) {
@@ -235,8 +343,7 @@ function openDrawer(boat = null) {
     const year = boat?.scheduleYear || state.year;
     const range = fullYearRange(year);
     document.getElementById("drawerTitle").textContent = boat ? `Edit ${boat.vesselName}` : "Add boat";
-    elements.deviceId.value = boat?.id || "";
-    elements.deviceId.disabled = Boolean(boat);
+    elements.deviceId.value = boat?.id || randomDeviceId();
     elements.vesselName.value = boat?.vesselName || "";
     renderBoatTypeOptions(boat?.boatType);
     elements.availability.value = boat?.availability || "available";
@@ -250,7 +357,7 @@ function openDrawer(boat = null) {
     elements.backdrop.classList.remove("hidden");
     elements.drawer.classList.add("open");
     elements.drawer.setAttribute("aria-hidden", "false");
-    setTimeout(() => (boat ? elements.vesselName : elements.deviceId).focus(), 50);
+    setTimeout(() => elements.vesselName.focus(), 50);
 }
 
 function closeDrawer() {
@@ -323,6 +430,31 @@ async function saveBoat(config) {
     await setDoc(doc(state.db, "boats", config.id), { ...payload, configuration_updated_at: serverTimestamp() }, { merge: true });
 }
 
+// Queue a configuration downlink to the boat's tracker through the LoRaWAN
+// gateway (ChirpStack). The device applies Device ID, name, type, availability,
+// reporting interval, rental range, and weekly rental hours on receipt.
+async function pushTrackerConfig() {
+    const config = configFromForm();
+    const validationError = validateForm(config);
+    if (validationError) { showMessage(validationError); return; }
+    if (state.demoMode) { showMessage("Demo mode: no LoRaWAN gateway is connected."); return; }
+    if (!state.user || !state.isAdmin) { showMessage("Sign in with an Administrator account to update trackers."); return; }
+
+    elements.updateTrackerButton.disabled = true;
+    elements.updateTrackerButton.querySelector("span").textContent = "Sending…";
+    try {
+        const { functions, functionsModule } = await getFirebase();
+        const result = await functionsModule.httpsCallable(functions, "pushBoatConfig")(config);
+        showMessage(`Tracker update queued for ${config.id} (${result.data?.bytes ?? "?"} bytes). The device applies it at its next downlink window.`, true);
+    } catch (error) {
+        console.error("pushBoatConfig failed", error);
+        showMessage(error.message || "Unable to send tracker update.");
+    } finally {
+        elements.updateTrackerButton.disabled = false;
+        elements.updateTrackerButton.querySelector("span").textContent = "Update Boat Tracker";
+    }
+}
+
 async function deleteBoat() {
     const boat = state.boats.get(state.editingId);
     if (!boat) return;
@@ -367,11 +499,16 @@ function startDemo() {
     state.isAdmin = true;
     state.boatTypes = restoreDemoBoatTypes();
     state.boats = new Map(restoreDemoBoats().map(boat => [boat.id, boat]));
+    try {
+        const savedClosure = JSON.parse(localStorage.getItem(DEMO_CLOSURE_KEY) || "null");
+        if (savedClosure) state.closure = normalizeClosure(savedClosure);
+    } catch (error) { console.warn("Ignoring invalid saved livery closure", error); }
+    renderClosure();
     elements.signIn.disabled = true;
     elements.signIn.innerHTML = `<i data-lucide="database" class="h-4 w-4"></i><span>Demo mode</span>`;
     setConnection("live", "Local demo");
     renderTable();
-    renderBoatTypes();
+    renderBoatTypeOptions();
     lucide.createIcons();
 }
 
@@ -391,7 +528,7 @@ function updateAuth(user, isAdmin) {
 async function startFirebase() {
     if (!isConfigValid()) {
         setConnection("error", "Not configured");
-        showAuthModal("signIn");
+        showAuthModal("error", { message: "Firebase configuration missing. Please contact administrator." });
         return;
     }
     try {
@@ -420,8 +557,15 @@ async function startFirebase() {
                 onSnapshot(collection(state.db, "boat_types"), snapshot => {
                     const types = snapshot.docs.map(document => ({ id: document.id, name: String(document.data().name || "").trim() })).filter(type => type.name);
                     if (types.length) state.boatTypes = types;
-                    renderBoatTypes();
+                    renderBoatTypeOptions();
                 });
+
+                onSnapshot(doc(state.db, "fleet_config", "livery"), snapshot => {
+                    if (snapshot.exists()) {
+                        state.closure = normalizeClosure(snapshot.data());
+                        renderClosure();
+                    }
+                }, error => console.warn("Unable to load livery closure configuration", error));
             },
             onDenied: () => {
                 updateAuth(null, false);
@@ -440,10 +584,19 @@ async function startFirebase() {
 
 function setupControls() {
     for (let year = currentYear - 1; year <= currentYear + 5; year += 1) elements.yearFilter.add(new Option(String(year), String(year), year === currentYear, year === currentYear));
+    MONTH_LABELS.forEach((label, index) => {
+        elements.closureStartMonth.add(new Option(label, String(index + 1)));
+        elements.closureEndMonth.add(new Option(label, String(index + 1)));
+    });
+    elements.saveClosureButton.addEventListener("click", saveClosure);
+    renderClosure();
     elements.yearFilter.addEventListener("change", event => { state.year = Number(event.target.value); renderTable(); });
     elements.search.addEventListener("input", event => { state.search = event.target.value.trim().toLowerCase(); renderTable(); });
     document.getElementById("addBoatButton").addEventListener("click", () => openDrawer());
     document.getElementById("addBoatTypeButton").addEventListener("click", addBoatType);
+    document.getElementById("renameBoatTypeButton").addEventListener("click", renameBoatType);
+    document.getElementById("removeBoatTypeButton").addEventListener("click", removeBoatType);
+    elements.updateTrackerButton.addEventListener("click", pushTrackerConfig);
     elements.deleteButton.addEventListener("click", deleteBoat);
     document.getElementById("closeDrawerButton").addEventListener("click", closeDrawer);
     document.getElementById("cancelButton").addEventListener("click", closeDrawer);
@@ -475,6 +628,6 @@ function setupControls() {
 setupControls();
 buildScheduleEditor();
 state.boatTypes = defaultBoatTypes();
-renderBoatTypes();
+renderBoatTypeOptions();
 lucide.createIcons();
 startFirebase();

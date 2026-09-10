@@ -13,10 +13,11 @@
     <div class="flex h-full flex-col">
         <header class="app-header">
             <div class="flex min-w-0 items-center gap-3">
-                <a href="./index.html" class="brand-mark" aria-label="Return to operations dashboard">CWB</a>
-                <div class="hidden h-7 w-px bg-zinc-700 sm:block"></div>
+                <a href="./index.html" aria-label="Return to operations dashboard">
+                    <img class="brand-logo" src="./assets/Screenshot%202026-09-04%20111147.png" alt="The Center for Wooden Boats">
+                </a>
                 <div class="min-w-0">
-                    <h1 class="truncate text-sm font-semibold uppercase tracking-wide sm:text-base">Fleet Administration</h1>
+                    <h1 class="brand-title truncate text-sm font-semibold uppercase tracking-wide sm:text-base">Fleet Administration</h1>
                     <p class="truncate text-[11px] text-zinc-400">Boat identity and annual rental schedules</p>
                 </div>
             </div>
@@ -29,7 +30,7 @@
         </header>
 
         <main class="admin-workspace">
-            <section class="admin-content" aria-labelledby="fleetHeading">
+            <section class="admin-content with-banner" aria-labelledby="fleetHeading">
                 <div class="admin-toolbar">
                     <div>
                         <p class="eyebrow">Configuration</p>
@@ -41,6 +42,21 @@
                         <label class="search-field"><i data-lucide="search" class="h-4 w-4"></i><span class="sr-only">Search boats</span><input id="adminSearch" type="search" placeholder="Find boat or DevEUI" autocomplete="off"></label>
                         <button id="addBoatButton" class="primary-button" type="button"><i data-lucide="plus" class="h-4 w-4"></i>Add boat</button>
                     </div>
+                </div>
+
+                <div class="livery-banner" role="group" aria-label="Livery closure">
+                    <i data-lucide="snowflake" class="h-4 w-4 shrink-0 text-sky-400"></i>
+                    <div class="livery-copy"><strong>Livery closure</strong><span>Annual off-season shutdown. Included in every tracker configuration push so devices can deep-sleep for power management.</span></div>
+                    <label class="livery-toggle"><input id="closureEnabled" type="checkbox" checked><span>Enabled</span></label>
+                    <div class="livery-range">
+                        <span>from</span>
+                        <select id="closureStartMonth" aria-label="Closure start month"></select>
+                        <input id="closureStartDay" type="number" min="1" max="31" value="15" aria-label="Closure start day">
+                        <span>to</span>
+                        <select id="closureEndMonth" aria-label="Closure end month"></select>
+                        <input id="closureEndDay" type="number" min="1" max="31" value="15" aria-label="Closure end day">
+                    </div>
+                    <button id="saveClosureButton" class="secondary-button" type="button"><i data-lucide="save" class="h-4 w-4"></i>Save closure</button>
                 </div>
 
                 <div class="admin-table-shell">
@@ -67,18 +83,20 @@
             <fieldset class="form-section">
                 <legend>Identity</legend>
                 <div class="form-grid two-columns">
-                    <label><span>Device ID / DevEUI</span><input id="deviceId" name="deviceId" type="text" maxlength="32" pattern="[0-9A-Fa-f]{16}" placeholder="70B3D57ED0000001" required><small>Exactly 16 hexadecimal characters.</small></label>
+                    <label><span>Device ID</span><input id="deviceId" name="deviceId" type="text" maxlength="32" readonly required><small>Auto-generated tracker identity.</small></label>
                     <label><span>Boat name</span><input id="vesselName" name="vesselName" type="text" maxlength="60" placeholder="Rowboat Martha" required></label>
-                    <label><span>Boat type</span><select id="boatType" name="boatType" required></select></label>
+                    <div class="field"><span>Boat type</span>
+                        <div class="boat-type-controls">
+                            <select id="boatType" name="boatType" required aria-label="Boat type"></select>
+                            <button id="renameBoatTypeButton" class="icon-button" type="button" title="Rename selected boat type" aria-label="Rename selected boat type"><i data-lucide="pencil" class="h-4 w-4"></i></button>
+                            <button id="removeBoatTypeButton" class="icon-button" type="button" title="Delete selected boat type" aria-label="Delete selected boat type"><i data-lucide="trash-2" class="h-4 w-4"></i></button>
+                            <button id="addBoatTypeButton" class="icon-button" type="button" title="Add boat type" aria-label="Add boat type"><i data-lucide="plus" class="h-4 w-4"></i></button>
+                        </div>
+                    </div>
                     <label><span>Available</span><select id="availability" name="availability" required><option value="available">Yes</option><option value="under_repair">Under Repair</option></select></label>
                     <label><span>Schedule year</span><input id="scheduleYear" name="scheduleYear" type="number" min="2025" max="2100" required></label>
                     <label><span>Reporting interval</span><input id="reportIntervalMinutes" name="reportIntervalMinutes" type="number" min="1" max="60" step="1" value="3" required><small>Minutes between tracker reports. Allowed range: 1–60.</small></label>
                 </div>
-            </fieldset>
-
-            <fieldset class="form-section">
-                <div class="section-heading"><legend>Boat types</legend><div class="add-boat-type"><input id="newBoatType" type="text" maxlength="40" placeholder="New boat type" aria-label="New boat type"><button id="addBoatTypeButton" class="secondary-button" type="button"><i data-lucide="plus" class="h-4 w-4"></i>Add type</button></div></div>
-                <div id="boatTypeList" class="boat-type-list"></div>
             </fieldset>
 
             <fieldset class="form-section">
@@ -97,6 +115,7 @@
             <div class="drawer-actions">
                 <button id="deleteBoatButton" class="danger-button hidden" type="button"><i data-lucide="trash-2" class="h-4 w-4"></i><span>Delete boat</span></button>
                 <button id="cancelButton" class="secondary-button" type="button">Cancel</button>
+                <button id="updateTrackerButton" class="secondary-button" type="button" title="Push this configuration to the boat's tracker via the LoRaWAN gateway"><i data-lucide="radio-tower" class="h-4 w-4"></i><span>Update Boat Tracker</span></button>
                 <button id="saveButton" class="primary-button" type="submit"><i data-lucide="save" class="h-4 w-4"></i><span>Save boat</span></button>
             </div>
         </form>

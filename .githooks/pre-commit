@@ -1,0 +1,57 @@
+#!/usr/bin/env sh
+
+set -eu
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+
+staged_tree=$(mktemp -d)
+trap 'rm -rf "$staged_tree"' EXIT HUP INT TERM
+git checkout-index --all --prefix="$staged_tree/"
+
+echo "Security gate: checking staged secrets"
+gitleaks protect --staged --redact --no-banner
+
+echo "Security gate: checking CWB privacy controls"
+(cd "$staged_tree" && node tools/privacy-gate/privacy-gate.mjs)
+
+echo "Security gate: checking GCP endpoint authentication"
+(cd "$staged_tree" && node tools/security-gate/security-gate.mjs)
+
+if git diff --cached --name-only | grep -Eq '^platforms/gcp/cloud-ingest/(.*\.js|package(-lock)?\.json)$'; then
+    echo "Security gate: testing GCP endpoint authentication"
+    if [ ! -d "$root/platforms/gcp/cloud-ingest/node_modules" ]; then
+        echo "Security gate: run npm ci in platforms/gcp/cloud-ingest before committing" >&2
+        exit 1
+    fi
+    (cd "$staged_tree/platforms/gcp/cloud-ingest" && NODE_PATH="$root/platforms/gcp/cloud-ingest/node_modules" npm test)
+fi
+
+echo "Security gate: checking staged JavaScript"
+git diff --cached --name-only --diff-filter=ACMR |
+grep -E '\.(cjs|js|mjs)$' |
+grep -Ev '(^|/)(node_modules|vendor)/' |
+while IFS= read -r source; do
+    node --check "$staged_tree/$source"
+done
+
+if git diff --cached --name-only | grep -Eq '(^|/)(package.json|package-lock.json|npm-shrinkwrap.json)$'; then
+    echo "Security gate: checking npm dependencies"
+    find "$staged_tree" -path '*/node_modules' -prune -o -name package.json -print |
+    while IFS= read -r manifest; do
+        (cd "$(dirname "$manifest")" && npm audit --omit=dev --audit-level=high)
+    done
+fi
+
+if git diff --cached --name-only | grep -q '^firmware/'; then
+    echo "Security gate: checking firmware static analysis"
+    if [ -x firmware/.venv/Scripts/python.exe ]; then
+        platformio_python=firmware/.venv/Scripts/python.exe
+    elif [ -x firmware/.venv/bin/python ]; then
+        platformio_python=firmware/.venv/bin/python
+    else
+        echo "Security gate: firmware virtual environment not found" >&2
+        exit 1
+    fi
+    "$platformio_python" -m platformio check --project-dir "$staged_tree/firmware" --skip-packages --src-filters '+<src/>' --silent
+fi

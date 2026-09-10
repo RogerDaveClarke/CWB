@@ -70,19 +70,36 @@ function checkTrackingGate() {
     const file = "platforms/gcp/cloud-ingest/index.js";
     const source = read(file);
     if (!source) return;
-    const writesTrail = /collection\(\s*['"]history['"]\s*\)\s*\.add\(/.test(source);
-    const gated = /tracking_enabled/.test(source);
-    if (writesTrail && !gated) report("P003", file, "history().add() is not gated on tracking_enabled");
+    const historyWrite = source.search(/(?:\.add\(|transaction\.(?:create|set|update)\()[^;\n]*collection\(\s*['"]history['"]\s*\)/);
+    if (historyWrite < 0) return;
+    const trackingRead = source.search(/trackingEnabled\s*=\s*boatSnapshot\.get\(\s*['"]tracking_enabled['"]\s*\)/);
+    const trackingGuard = source.lastIndexOf('if (trackingEnabled)', historyWrite);
+    if (trackingRead < 0 || trackingGuard < trackingRead) {
+        report("P003", file, "history writes are not gated on tracking_enabled");
+    }
+    const omitsIdleCoordinates = /\{\s*latitude,\s*longitude,\s*\.\.\.operationalPingPayload\s*\}\s*=\s*pingPayload/.test(source)
+        && /last_ping:\s*trackingEnabled\s*\?\s*pingPayload\s*:\s*operationalPingPayload/.test(source)
+        && /transaction\.update\(trackingRef/.test(source);
+    if (!omitsIdleCoordinates) report("P003", file, "idle last_ping may retain precise coordinates");
 }
 
 function checkErasureOnCheckIn() {
-    const file = "platforms/gcp/frontend/dashboard.js";
+    const file = "platforms/gcp/cloud-ingest/userAdmin.js";
     const source = read(file);
     if (!source) return;
-    const deletesTrail = /deleteDoc\(/.test(source) && /['"]history['"]/.test(source);
-    const clearsIdentity = policy.identityKeys.some(key => new RegExp(`${key}:\\s*deleteField\\(\\)`).test(source));
-    if (!deletesTrail) report("P004", file, "check-in does not delete the GPS trail");
-    if (!clearsIdentity) report("P004", file, "check-in does not clear renter identity fields");
+    const checkIn = source.match(/exports\.checkInBoat\s*=\s*onCall\([\s\S]*$/)?.[0] || "";
+    const disableIndex = checkIn.search(/tracking_enabled:\s*false/);
+    const deleteIndex = checkIn.search(/recursiveDelete\([^)]*collection\(['"]history['"]\)/);
+    const disablesTracking = disableIndex >= 0;
+    const deletesTrail = deleteIndex >= 0;
+    const clearsIdentity = policy.identityKeys.some(key => new RegExp(`${key}:\\s*FieldValue\\.delete\\(\\)`).test(checkIn));
+    const clearsLatestCoordinates = /['"]last_ping\.latitude['"]:\s*FieldValue\.delete\(\)/.test(checkIn)
+        && /['"]last_ping\.longitude['"]:\s*FieldValue\.delete\(\)/.test(checkIn);
+    if (!disablesTracking) report("P004", file, "check-in does not disable tracking before trail deletion");
+    if (!deletesTrail) report("P004", file, "check-in does not delete the GPS trail server-side");
+    if (disablesTracking && deletesTrail && disableIndex > deleteIndex) report("P004", file, "check-in deletes the GPS trail before disabling tracking");
+    if (!clearsIdentity) report("P004", file, "check-in does not clear renter identity fields server-side");
+    if (!clearsLatestCoordinates) report("P004", file, "check-in does not clear the latest precise coordinates");
 }
 
 function checkAnonymisationClaims() {
@@ -124,6 +141,19 @@ function checkPrivacyPolicyLink() {
     if (!/privacy/i.test(source)) report("P008", file, "no privacy policy link on the operations homepage");
 }
 
+function checkUsersCollectionExposure() {
+    const file = "platforms/gcp/firestore.rules";
+    const source = read(file);
+    if (!source) return;
+    for (const rule of parseFirestoreRules(source)) {
+        const isUsers = /\/users\/\{userId\}$/.test(rule.path);
+        const isPublic = /^true$/.test(rule.condition);
+        if (isUsers && isPublic && rule.operations.some(op => op === "read" || op === "get" || op === "list")) {
+            report("P009", file, `${rule.path} -> allow ${rule.operations.join(", ")}: if ${rule.condition};`);
+        }
+    }
+}
+
 checkFirestoreExposure();
 checkTrackingGate();
 checkErasureOnCheckIn();
@@ -131,6 +161,7 @@ checkAnonymisationClaims();
 checkRetentionLimit();
 checkConsentArtifact();
 checkPrivacyPolicyLink();
+checkUsersCollectionExposure();
 
 const today = new Date().toISOString().slice(0, 10);
 const acknowledged = new Map(policy.acknowledged.map(entry => [entry.id, entry]));

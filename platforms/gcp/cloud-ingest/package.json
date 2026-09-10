@@ -3,11 +3,29 @@
   "version": "1.0.0",
   "description": "GCP HTTP Cloud Function mapping LoRaWAN payloads to Firestore",
   "main": "index.js",
+  "scripts": {
+    "test": "node --test test/authGuards.test.js test/webhookAuth.test.js test/retention.test.js test/securityLog.test.js",
+    "test:rules": "node --test test/firestore.rules.test.js"
+  },
   "engines": {
-    "node": "20"
+    "node": "22"
   },
   "dependencies": {
-    "firebase-admin": "^11.8.0",
-    "firebase-functions": "^4.9.0"
+    "firebase-admin": "^14.3.0",
+    "firebase-functions": "^7.3.2"
+  },
+  "overrides": {
+    "@google-cloud/storage": "^7.22.0",
+    "firebase-admin": "^14.3.0",
+    "firebase-functions": "^7.3.2",
+    "gaxios": "^7.3.1",
+    "google-auth-library": "^10.9.1",
+    "retry-request": "^8.0.4",
+    "teeny-request": "^10.1.4",
+    "uuid": "^11.0.0"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.0",
+    "firebase": "^12.2.1"
   }
 }
