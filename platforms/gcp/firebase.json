@@ -6,6 +6,14 @@
       "**/.*",
       "**/node_modules/**"
     ],
+    "redirects": [
+      { "source": "/index.html", "destination": "/", "type": 301 },
+      { "source": "/admin.html", "destination": "/admin", "type": 301 },
+      { "source": "/history.html", "destination": "/history", "type": 301 },
+      { "source": "/users.html", "destination": "/users", "type": 301 },
+      { "source": "/mfa.html", "destination": "/mfa", "type": 301 },
+      { "source": "/rental-simulation.html", "destination": "/rental-simulation", "type": 301 }
+    ],
     "rewrites": [
       { "source": "/admin", "destination": "/admin.html" },
       { "source": "/history", "destination": "/history.html" },

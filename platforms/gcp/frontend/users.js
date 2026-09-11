@@ -562,7 +562,7 @@ async function init() {
 
             if (reason === "mfa-required") {
                 setConnection("error", "2FA required");
-                deniedText.innerHTML = 'Two-factor authentication (2FA) is required to manage accounts. Please complete <a class="text-sky-400 underline" href="./mfa.html">2FA Setup</a>.';
+                deniedText.innerHTML = 'Two-factor authentication (2FA) is required to manage accounts. Please complete <a class="text-sky-400 underline" href="/mfa">2FA Setup</a>.';
             } else {
                 setConnection("error", "Access denied");
                 deniedText.textContent = "Administrator privileges are required to access Account Administration.";

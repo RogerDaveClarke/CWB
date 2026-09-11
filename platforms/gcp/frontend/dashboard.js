@@ -453,7 +453,7 @@ async function startFirebase() {
                         state.boats.clear();
                         elements.dataMode.textContent = "Firebase live mode · 0 boats";
                         setConnection("live", "Firebase live (0 boats)");
-                        elements.tableBody.innerHTML = `<tr><td colspan="13" class="empty-cell">No boats configured in Firestore yet. Use <a class="text-sky-400 underline" href="./admin.html">Fleet Administration</a> to add boats.</td></tr>`;
+                        elements.tableBody.innerHTML = `<tr><td colspan="13" class="empty-cell">No boats configured in Firestore yet. Use <a class="text-sky-400 underline" href="/admin">Fleet Administration</a> to add boats.</td></tr>`;
                         render();
                         return;
                     }

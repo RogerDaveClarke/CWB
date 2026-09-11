@@ -111,4 +111,7 @@ test('live profiles override stale privileged token claims', async () => {
     firebase: { sign_in_second_factor: 'totp' }
   };
   await assertFails(getDocs(collection(authenticatedDb('demoted-1', staleAdminToken), 'users')));
+
+  const mismatchedRole = authenticatedDb('staff-1', { role: 'manager', functionLevel: 'operations' });
+  await assertFails(getDoc(doc(mismatchedRole, 'boats/70b3d57ed0000001')));
 });

@@ -11,7 +11,13 @@ function requireAuthenticatedUser(request) {
 }
 
 async function requireActiveSession(auth, loadUser = (uid) => getAuth().getUser(uid)) {
-  const user = await loadUser(auth.uid);
+  let user;
+  try {
+    user = await loadUser(auth.uid);
+  } catch {
+    logSecurityEvent('callable_auth_denied', { reason: 'user_deleted', actor: pseudonymousId(auth.uid) }, 'WARNING');
+    throw new HttpsError('unauthenticated', 'Sign in again.');
+  }
   const authenticatedAt = Number(auth.token?.auth_time) * 1000;
   const tokensValidAfter = Date.parse(user.tokensValidAfterTime || '');
   if (user.disabled || !Number.isFinite(authenticatedAt) || !Number.isFinite(tokensValidAfter)

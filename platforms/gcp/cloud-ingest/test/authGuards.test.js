@@ -74,4 +74,8 @@ test('MFA-admin guard rejects disabled and revoked sessions', async () => {
     () => requireMfaAdmin({ auth }, async () => ({ ...ACTIVE_USER, tokensValidAfterTime: '2026-01-01T00:00:02.000Z' })),
     'unauthenticated'
   );
+  await expectCode(
+    () => requireMfaAdmin({ auth }, async () => { throw new Error('user-not-found'); }),
+    'unauthenticated'
+  );
 });

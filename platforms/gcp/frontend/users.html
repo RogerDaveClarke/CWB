@@ -16,7 +16,7 @@
         <!-- Application Header matching Operations & Fleet Admin -->
         <header class="app-header">
             <div class="flex min-w-0 items-center gap-3">
-                <a href="./index.html" aria-label="Return to operations dashboard">
+                <a href="/" aria-label="Return to operations dashboard">
                     <img class="brand-logo" src="./assets/Screenshot%202026-09-04%20111147.png" alt="The Center for Wooden Boats">
                 </a>
                 <div class="min-w-0">
@@ -26,9 +26,9 @@
             </div>
             <div class="flex items-center gap-2">
                 <div id="usersConnection" class="connection-pill" role="status"><span class="status-dot"></span><span class="hidden sm:inline">Loading</span></div>
-                <a href="./admin.html" class="header-command"><i data-lucide="settings" class="h-4 w-4"></i><span class="hidden sm:inline">Fleet Admin</span></a>
-                <a href="./history.html" class="header-command"><i data-lucide="history" class="h-4 w-4"></i><span class="hidden sm:inline">History</span></a>
-                <a href="./index.html" class="header-command"><i data-lucide="map" class="h-4 w-4"></i><span class="hidden sm:inline">Operations</span></a>
+                <a href="/admin" class="header-command"><i data-lucide="settings" class="h-4 w-4"></i><span class="hidden sm:inline">Fleet Admin</span></a>
+                <a href="/history" class="header-command"><i data-lucide="history" class="h-4 w-4"></i><span class="hidden sm:inline">History</span></a>
+                <a href="/" class="header-command"><i data-lucide="map" class="h-4 w-4"></i><span class="hidden sm:inline">Operations</span></a>
                 <button id="authActionButton" class="header-command" type="button"><i data-lucide="log-in" class="h-4 w-4"></i><span>Sign in</span></button>
             </div>
         </header>
@@ -44,8 +44,8 @@
                     <h2 class="text-lg font-bold text-white mb-2">Access Restricted</h2>
                     <p id="deniedText" class="text-sm text-zinc-400 mb-6">Administrator privileges and two-factor authentication are required to manage accounts.</p>
                     <div class="flex justify-center gap-3">
-                        <a href="./mfa.html" class="primary-button"><i data-lucide="shield-check" class="h-4 w-4"></i>Setup 2FA</a>
-                        <a href="./index.html" class="secondary-button"><i data-lucide="map" class="h-4 w-4"></i>Operations</a>
+                        <a href="/mfa" class="primary-button"><i data-lucide="shield-check" class="h-4 w-4"></i>Setup 2FA</a>
+                        <a href="/" class="secondary-button"><i data-lucide="map" class="h-4 w-4"></i>Operations</a>
                     </div>
                 </div>
             </div>

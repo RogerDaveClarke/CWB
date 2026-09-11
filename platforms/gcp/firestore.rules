@@ -22,6 +22,8 @@ service cloud.firestore {
     function isAdmin() {
       return hasActiveProfile()
         && liveRole() == 'admin'
+        && (request.auth.token.get('admin', false) == true
+          || request.auth.token.get('role', '') == 'admin')
         && request.auth.token.get('firebase', {}).get('sign_in_second_factor', '') == 'totp';
     }
 
@@ -29,14 +31,18 @@ service cloud.firestore {
       return isAdmin()
         || (hasActiveProfile()
           && liveRole() in ['manager', 'staff']
-          && liveFunctionLevel() == 'operations');
+          && request.auth.token.get('role', '') == liveRole()
+          && liveFunctionLevel() == 'operations'
+          && request.auth.token.get('functionLevel', '') == liveFunctionLevel());
     }
 
     function hasMfaOperationsAccess() {
       return hasActiveProfile()
         && (liveRole() == 'admin'
           || (liveRole() in ['manager', 'staff']
-            && liveFunctionLevel() == 'operations'))
+            && request.auth.token.get('role', '') == liveRole()
+            && liveFunctionLevel() == 'operations'
+            && request.auth.token.get('functionLevel', '') == liveFunctionLevel()))
         && request.auth.token.get('firebase', {}).get('sign_in_second_factor', '') == 'totp';
     }
 

@@ -88,7 +88,6 @@ exports.claimDefaultRole = onCall(CALLABLE_OPTIONS, async (request) => {
     throw new HttpsError('permission-denied', 'This account has been suspended by an administrator.');
   }
 
-  await applyClaims(request.auth.uid, AUTO_PROVISION_ROLE, AUTO_PROVISION_FUNCTION_LEVEL, false);
   await writeUserDoc(request.auth.uid, {
     email,
     displayName: userRecord.displayName || '',
@@ -98,6 +97,7 @@ exports.claimDefaultRole = onCall(CALLABLE_OPTIONS, async (request) => {
     createdBy: 'domain-auto-provision',
     createdAt: FieldValue.serverTimestamp()
   });
+  await applyClaims(request.auth.uid, AUTO_PROVISION_ROLE, AUTO_PROVISION_FUNCTION_LEVEL, false);
   return { granted: true, role: AUTO_PROVISION_ROLE, functionLevel: AUTO_PROVISION_FUNCTION_LEVEL };
 });
 
@@ -128,7 +128,6 @@ exports.inviteUser = onCall(CALLABLE_OPTIONS, async (request) => {
   if (displayName && userRecord.displayName !== displayName) {
     await auth.updateUser(userRecord.uid, { displayName });
   }
-  await applyClaims(userRecord.uid, role, functionLevel);
   await writeUserDoc(userRecord.uid, {
     email,
     displayName: displayName || userRecord.displayName || '',
@@ -139,6 +138,7 @@ exports.inviteUser = onCall(CALLABLE_OPTIONS, async (request) => {
     createdBy: request.auth.uid,
     createdAt: FieldValue.serverTimestamp()
   });
+  await applyClaims(userRecord.uid, role, functionLevel);
   return { uid: userRecord.uid, email, displayName, address, role, functionLevel };
 });
 
@@ -159,13 +159,13 @@ exports.updateUserProfile = onCall(CALLABLE_OPTIONS, async (request) => {
     displayName: displayName || undefined
   });
 
-  await applyClaims(uid, role, functionLevel);
   await writeUserDoc(uid, {
     displayName: displayName || '',
     address: address || '',
     role,
     functionLevel
   });
+  await applyClaims(uid, role, functionLevel);
 
   return { uid, displayName, address, role, functionLevel };
 });
@@ -181,8 +181,8 @@ exports.setUserRole = onCall(CALLABLE_OPTIONS, async (request) => {
   if (uid === request.auth.uid && role !== 'admin') {
     throw new HttpsError('failed-precondition', 'You cannot remove your own administrator role.');
   }
-  await applyClaims(uid, role, functionLevel);
   await writeUserDoc(uid, { role, functionLevel });
+  await applyClaims(uid, role, functionLevel);
   return { uid, role, functionLevel };
 });
 
@@ -196,11 +196,11 @@ exports.disableUser = onCall(CALLABLE_OPTIONS, async (request) => {
   if (uid === request.auth.uid) {
     throw new HttpsError('failed-precondition', 'You cannot suspend your own account.');
   }
+  await writeUserDoc(uid, { status: 'suspended', role: null, functionLevel: null });
   await getAuth().updateUser(uid, { disabled: true });
   await getAuth().setCustomUserClaims(uid, {});
   await getAuth().revokeRefreshTokens(uid);
   logSecurityEvent('user_suspended', { actor: pseudonymousId(request.auth.uid), target: pseudonymousId(uid) });
-  await writeUserDoc(uid, { status: 'suspended', role: null, functionLevel: null });
   return { uid, status: 'suspended' };
 });
 
@@ -230,6 +230,7 @@ exports.deleteUser = onCall(CALLABLE_OPTIONS, async (request) => {
     throw new HttpsError('failed-precondition', 'You cannot delete your own account.');
   }
   const auth = getAuth();
+  await db.collection('users').doc(uid).delete();
   try {
     await auth.deleteUser(uid);
   } catch (error) {
@@ -237,7 +238,7 @@ exports.deleteUser = onCall(CALLABLE_OPTIONS, async (request) => {
       throw error;
     }
   }
-  await db.collection('users').doc(uid).delete();
+  logSecurityEvent('user_deleted', { actor: pseudonymousId(request.auth.uid), target: pseudonymousId(uid) });
   return { uid, deleted: true };
 });
 

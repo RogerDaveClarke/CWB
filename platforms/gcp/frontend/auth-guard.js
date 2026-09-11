@@ -87,34 +87,29 @@ export function claimsFromToken(tokenResult) {
     };
 }
 
+function claimsFromProfile(profile) {
+    const role = typeof profile?.role === "string" ? profile.role : null;
+    const functionLevel = typeof profile?.functionLevel === "string" ? profile.functionLevel : null;
+    return { isAdmin: role === "admin", role, functionLevel, status: profile?.status || null };
+}
+
 export async function getEffectiveUserClaims(user, db, firestoreModule, forceRefresh = false) {
     // The cached ID token already carries the claims we need on the common
     // path. Refreshing unconditionally added a token-service round-trip to
     // every page load; initAuthGuard re-reads with forceRefresh only when the
     // cached claims fail the page's requirements.
     let tokenResult = await user.getIdTokenResult(forceRefresh);
-    let claims = tokenResult.claims || {};
-    let role = typeof claims.role === "string" ? claims.role : null;
-    let functionLevel = typeof claims.functionLevel === "string" ? claims.functionLevel : null;
-    let isAdmin = claims.admin === true || role === "admin";
-
-    if (!isAdmin && (!role || !functionLevel) && db && firestoreModule) {
-        try {
-            const userSnap = await firestoreModule.getDoc(firestoreModule.doc(db, "users", user.uid));
-            if (userSnap.exists()) {
-                const data = userSnap.data();
-                if (!role && data.role) role = data.role;
-                if (!functionLevel && data.functionLevel) functionLevel = data.functionLevel;
-                if (role === "admin" || data.admin === true) isAdmin = true;
-            }
-        } catch (e) {
-            console.warn("Could not read users profile doc", e);
-        }
+    let effectiveClaims = claimsFromToken(tokenResult);
+    if (db && firestoreModule) {
+        const userSnap = await firestoreModule.getDoc(firestoreModule.doc(db, "users", user.uid));
+        effectiveClaims = userSnap.exists()
+            ? claimsFromProfile(userSnap.data())
+            : { isAdmin: false, role: null, functionLevel: null, status: null };
     }
 
     return {
         tokenResult,
-        claims: { isAdmin, role, functionLevel }
+        claims: effectiveClaims
     };
 }
 
@@ -124,6 +119,17 @@ export function satisfies(claims, tokenResult, spec = {}, user = null) {
     if (spec.functionLevels && !spec.functionLevels.includes(claims.functionLevel) && !claims.isAdmin) return { ok: false, reason: "function-required" };
     if (spec.requireMfa && !tokenHasMfa(tokenResult, user)) return { ok: false, reason: "mfa-required" };
     return { ok: true };
+}
+
+function evaluateAccess(claims, tokenResult, spec, user) {
+    if (!claims.role) return { ok: false, reason: "pending-role" };
+    if (claims.status !== "active") return { ok: false, reason: "session-revoked" };
+    const tokenClaims = claimsFromToken(tokenResult);
+    if (claims.role !== tokenClaims.role
+        || (!claims.isAdmin && claims.functionLevel !== tokenClaims.functionLevel)) {
+        return { ok: false, reason: "session-revoked" };
+    }
+    return satisfies(claims, tokenResult, spec, user);
 }
 
 export async function handleGoogleSignIn() {
@@ -406,9 +412,9 @@ function ensureAuthModal() {
                         Your account does not have permission to access this page.
                     </div>
                     <div class="cwb-auth-links">
-                        <a href="./index.html">Operations</a>
-                        <a href="./admin.html">Fleet Admin</a>
-                        <a href="./history.html">History</a>
+                        <a href="/">Operations</a>
+                        <a href="/admin">Fleet Admin</a>
+                        <a href="/history">History</a>
                     </div>
                     <button id="authSignOutBtn2" class="cwb-auth-btn-secondary" type="button">Sign Out</button>
                 </div>
@@ -547,26 +553,75 @@ export async function initAuthGuard(spec, { onReady, onDenied, onSignedOut }) {
 
     try {
         const { auth, authModule, db, firestoreModule, functions } = await getFirebase();
+        let profileUnsubscribe = null;
+        let offlineHandler = null;
+        let forcingExit = false;
+
+        const stopProfileWatch = () => {
+            profileUnsubscribe?.();
+            profileUnsubscribe = null;
+            if (offlineHandler) window.removeEventListener("offline", offlineHandler);
+            offlineHandler = null;
+        };
+
+        const forceSessionExit = async (reason, claims = {}) => {
+            if (forcingExit) return;
+            forcingExit = true;
+            document.documentElement.classList.add("auth-pending");
+            stopProfileWatch();
+            onDenied?.(reason, null, claims);
+            try {
+                await authModule.signOut(auth);
+            } finally {
+                window.location.replace("/");
+            }
+        };
+
+        const watchLiveProfile = (user, tokenResult) => new Promise(resolve => {
+            stopProfileWatch();
+            let initialSnapshot = true;
+            const profileRef = firestoreModule.doc(db, "users", user.uid);
+            profileUnsubscribe = firestoreModule.onSnapshot(profileRef, snapshot => {
+                const claims = snapshot.exists()
+                    ? claimsFromProfile(snapshot.data())
+                    : { isAdmin: false, role: null, functionLevel: null, status: null };
+                const check = claims.status === "active"
+                    ? satisfies(claims, tokenResult, spec, user)
+                    : { ok: false, reason: "session-revoked" };
+                if (!check.ok) {
+                    if (initialSnapshot) resolve(false);
+                    initialSnapshot = false;
+                    void forceSessionExit(check.reason || "session-revoked", claims);
+                    return;
+                }
+                if (initialSnapshot) resolve(true);
+                initialSnapshot = false;
+            }, () => {
+                if (initialSnapshot) resolve(false);
+                initialSnapshot = false;
+                void forceSessionExit("session-revoked");
+            });
+            offlineHandler = () => void forceSessionExit("session-unverifiable");
+            window.addEventListener("offline", offlineHandler);
+        });
+
         return authModule.onAuthStateChanged(auth, async (user) => {
             if (!user) {
+                stopProfileWatch();
                 showAuthModal("signIn");
                 onSignedOut?.();
                 return;
             }
 
             let { tokenResult, claims } = await getEffectiveUserClaims(user, db, firestoreModule);
-            let check = (!claims.isAdmin && !claims.role)
-                ? { ok: false, reason: "pending-role" }
-                : satisfies(claims, tokenResult, spec, user);
+            let check = evaluateAccess(claims, tokenResult, spec, user);
 
             // A stale cached token is the most likely reason for a first-pass
             // failure (claims were changed since the token was minted), so pay
             // for the forced refresh only on that path.
             if (!check.ok) {
                 ({ tokenResult, claims } = await getEffectiveUserClaims(user, db, firestoreModule, true));
-                check = (!claims.isAdmin && !claims.role)
-                    ? { ok: false, reason: "pending-role" }
-                    : satisfies(claims, tokenResult, spec, user);
+                check = evaluateAccess(claims, tokenResult, spec, user);
             }
 
             if (check.reason === "pending-role") {
@@ -574,9 +629,7 @@ export async function initAuthGuard(spec, { onReady, onDenied, onSignedOut }) {
                 // the user on the pending screen.
                 if (await tryAutoProvisionDefaultRole(user)) {
                     ({ tokenResult, claims } = await getEffectiveUserClaims(user, db, firestoreModule, true));
-                    check = (!claims.isAdmin && !claims.role)
-                        ? { ok: false, reason: "pending-role" }
-                        : satisfies(claims, tokenResult, spec, user);
+                    check = evaluateAccess(claims, tokenResult, spec, user);
                 }
             }
 
@@ -586,7 +639,13 @@ export async function initAuthGuard(spec, { onReady, onDenied, onSignedOut }) {
                 return;
             }
 
+            if (check.reason === "session-revoked") {
+                await forceSessionExit("session-revoked", claims);
+                return;
+            }
+
             if (check.ok) {
+                if (!await watchLiveProfile(user, tokenResult)) return;
                 revealProtectedPage();
                 hideAuthModal();
                 // Record/increment login session in Firestore users collection.

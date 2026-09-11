@@ -147,6 +147,34 @@ Remediation and verification:
 - With the Firebase Auth module deliberately delayed by 2.5 seconds, the history application container remained `visibility:hidden`; after signed-out resolution, it remained hidden while only the sign-in modal became visible.
 - The MFA page removed `auth-pending` only after Firebase resolved and displayed its safe signed-out state.
 
+### PT-011: Open Sessions Not Immediately Ejected After Account Revocation
+
+**Severity:** High
+
+Backend Rules denied stale role claims, but an already-open page had no direct subscription to its own authorization profile. Suspension, deletion, or demotion could leave previously rendered data visible until another protected request failed.
+
+Remediation and verification:
+
+- Suspension writes the live profile to `suspended` and clears roles before disabling Auth, clearing claims, and revoking refresh tokens.
+- Deletion removes the live profile before deleting the Firebase Auth account.
+- Role updates write the live profile before changing/revoking token claims.
+- Every protected page subscribes to `users/{uid}` after initial authorization. Missing, suspended, demoted, or incompatible profiles synchronously re-hide the page, run page cleanup callbacks, sign out Firebase locally, and replace the document to clear in-memory state.
+- Protected content waits for the first live-profile snapshot before reveal. If connectivity is lost, the browser immediately conceals and ejects the session because current authorization can no longer be verified.
+- Firestore Rules continue checking the live profile, so cached ID tokens cannot read or write protected data after the profile transition.
+- Callable guards map deleted, disabled, and revoked Auth users to `unauthenticated`.
+
+### PT-012: Implementation Filenames Exposed In Navigation
+
+**Severity:** Low
+
+Internal links exposed static implementation filenames such as `/history.html` and `/admin.html` in the browser address bar.
+
+Remediation and verification:
+
+- All user-facing navigation uses canonical routes: `/`, `/history`, `/admin`, `/users`, `/mfa`, and `/rental-simulation`.
+- Firebase Hosting internally rewrites clean routes to static files and permanently redirects legacy `.html` URLs to canonical paths.
+- The penetration gate rejects user-facing `.html` links and missing canonical redirects.
+
 ## Black-Box Boundary Results
 
 - Telemetry endpoint: GET and OPTIONS returned 405; POST without token returned 403; wrong content type returned 415.
