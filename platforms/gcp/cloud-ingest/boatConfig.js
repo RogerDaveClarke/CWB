@@ -21,6 +21,14 @@ const CONFIG_FPORT = 10;
 // livery closes mid-October through mid-March.
 const DEFAULT_CLOSURE = { enabled: true, start: '10-15', end: '03-15' };
 
+function gatewayConnectionError() {
+  return new HttpsError('unavailable', 'Could not reach the LoRaWAN gateway.');
+}
+
+function gatewayRejectionError() {
+  return new HttpsError('unavailable', 'The LoRaWAN gateway rejected the configuration request.');
+}
+
 const DAY_KEYS = {
   monday: 'mo',
   tuesday: 'tu',
@@ -62,7 +70,7 @@ exports.pushBoatConfig = onCall({
   if (!baseUrl || !apiToken) {
     throw new HttpsError(
       'failed-precondition',
-      'The LoRaWAN gateway is not configured. Set CHIRPSTACK_API_URL and CHIRPSTACK_API_TOKEN on the pushBoatConfig function.'
+      'The LoRaWAN gateway is not configured.'
     );
   }
 
@@ -125,12 +133,13 @@ exports.pushBoatConfig = onCall({
       })
     });
   } catch (error) {
-    throw new HttpsError('unavailable', `Could not reach the LoRaWAN gateway: ${error.message}`);
+    console.error('ChirpStack queue request failed.', { name: error.name });
+    throw gatewayConnectionError();
   }
 
   if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new HttpsError('unavailable', `Gateway rejected the downlink (HTTP ${response.status}): ${text.slice(0, 200)}`);
+    console.error('ChirpStack rejected a queue request.', { status: response.status });
+    throw gatewayRejectionError();
   }
 
   const body = await response.json().catch(() => ({}));
@@ -142,3 +151,6 @@ exports.pushBoatConfig = onCall({
     bytes: Buffer.byteLength(json, 'utf8')
   };
 });
+
+module.exports.gatewayConnectionError = gatewayConnectionError;
+module.exports.gatewayRejectionError = gatewayRejectionError;

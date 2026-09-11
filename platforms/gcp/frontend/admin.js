@@ -72,7 +72,13 @@ function saveDemoBoatTypes() {
 function renderBoatTypeOptions(selectedType) {
     const selected = selectedType || elements.boatType.value || state.boatTypes[0]?.name || "";
     const types = state.boatTypes.some(type => type.name === selected) ? state.boatTypes : [...state.boatTypes, { id: "current", name: selected }];
-    elements.boatType.innerHTML = types.map(type => `<option value="${escapeHtml(type.name)}" ${type.name === selected ? "selected" : ""}>${escapeHtml(type.name)}</option>`).join("");
+    elements.boatType.replaceChildren(...types.map(type => {
+        const option = document.createElement("option");
+        option.value = type.name;
+        option.textContent = type.name;
+        option.selected = type.name === selected;
+        return option;
+    }));
 }
 
 function selectedBoatType() {
@@ -309,30 +315,88 @@ function renderTable() {
         elements.tableBody.innerHTML = `<tr><td colspan="9" class="empty-cell">No boats match this year and search.</td></tr>`;
         return;
     }
-    elements.tableBody.innerHTML = boats.map(boat => `<tr>
-        <td><span class="data-value">${escapeHtml(boat.id)}</span></td>
-        <td><span class="vessel-name">${escapeHtml(boat.vesselName)}</span></td>
-        <td><span class="data-value">${escapeHtml(boat.boatType)}</span></td>
-        <td><span class="data-value">${boat.reportIntervalMinutes} min</span></td>
-        <td><span class="data-value">${boat.scheduleYear}</span></td>
-        <td><span class="data-value">${formatDate(boat.seasonStart)}</span><span class="cell-note">through ${formatDate(boat.seasonEnd)}</span></td>
-        <td><span class="schedule-summary">${escapeHtml(summarizeSchedule(boat.schedule))}</span></td>
-        <td><span class="availability-value ${boat.availability === "under_repair" ? "repair" : ""}">${boat.availability === "under_repair" ? "Under Repair" : "Yes"}</span></td>
-        <td><div class="row-actions"><button class="icon-button edit-boat" type="button" data-boat-id="${escapeHtml(boat.id)}" title="Edit ${escapeHtml(boat.vesselName)}" aria-label="Edit ${escapeHtml(boat.vesselName)}"><i data-lucide="pencil" class="h-4 w-4"></i></button></div></td>
-    </tr>`).join("");
+    const textCell = (value, className = "data-value") => {
+        const cell = document.createElement("td");
+        const span = document.createElement("span");
+        span.className = className;
+        span.textContent = String(value ?? "");
+        cell.appendChild(span);
+        return cell;
+    };
+    elements.tableBody.replaceChildren(...boats.map(boat => {
+        const row = document.createElement("tr");
+        row.append(
+            textCell(boat.id),
+            textCell(boat.vesselName, "vessel-name"),
+            textCell(boat.boatType),
+            textCell(`${boat.reportIntervalMinutes} min`),
+            textCell(boat.scheduleYear)
+        );
+
+        const seasonCell = document.createElement("td");
+        const seasonStart = document.createElement("span");
+        seasonStart.className = "data-value";
+        seasonStart.textContent = formatDate(boat.seasonStart);
+        const seasonEnd = document.createElement("span");
+        seasonEnd.className = "cell-note";
+        seasonEnd.textContent = `through ${formatDate(boat.seasonEnd)}`;
+        seasonCell.append(seasonStart, seasonEnd);
+        row.appendChild(seasonCell);
+        row.appendChild(textCell(summarizeSchedule(boat.schedule), "schedule-summary"));
+
+        const availabilityCell = textCell(boat.availability === "under_repair" ? "Under Repair" : "Yes", `availability-value ${boat.availability === "under_repair" ? "repair" : ""}`.trim());
+        row.appendChild(availabilityCell);
+
+        const actionCell = document.createElement("td");
+        const actions = document.createElement("div");
+        actions.className = "row-actions";
+        const button = document.createElement("button");
+        button.className = "icon-button edit-boat";
+        button.type = "button";
+        button.dataset.boatId = boat.id;
+        button.title = `Edit ${boat.vesselName}`;
+        button.setAttribute("aria-label", `Edit ${boat.vesselName}`);
+        const icon = document.createElement("i");
+        icon.dataset.lucide = "pencil";
+        icon.className = "h-4 w-4";
+        button.appendChild(icon);
+        actions.appendChild(button);
+        actionCell.appendChild(actions);
+        row.appendChild(actionCell);
+        return row;
+    }));
     elements.tableBody.querySelectorAll(".edit-boat").forEach(button => button.addEventListener("click", () => openDrawer(state.boats.get(button.dataset.boatId))));
     lucide.createIcons();
 }
 
 function buildScheduleEditor(schedule = defaultSchedule()) {
-    elements.weeklySchedule.innerHTML = DAYS.map(day => {
+    elements.weeklySchedule.replaceChildren(...DAYS.map(day => {
         const window = schedule[day];
-        return `<div class="schedule-row" data-day="${day}">
-            <label class="day-toggle"><input class="day-enabled" type="checkbox" ${window.enabled ? "checked" : ""}><span>${DAY_LABELS[day]}</span></label>
-            <input class="schedule-time day-start" type="time" value="${window.start}" aria-label="${DAY_LABELS[day]} start time" ${window.enabled ? "" : "disabled"}>
-            <input class="schedule-time day-end" type="time" value="${window.end}" aria-label="${DAY_LABELS[day]} end time" ${window.enabled ? "" : "disabled"}>
-        </div>`;
-    }).join("");
+        const row = document.createElement("div");
+        row.className = "schedule-row";
+        row.dataset.day = day;
+        const label = document.createElement("label");
+        label.className = "day-toggle";
+        const enabled = document.createElement("input");
+        enabled.className = "day-enabled";
+        enabled.type = "checkbox";
+        enabled.checked = Boolean(window.enabled);
+        const dayLabel = document.createElement("span");
+        dayLabel.textContent = DAY_LABELS[day];
+        label.append(enabled, dayLabel);
+
+        const timeInput = (className, value, suffix) => {
+            const input = document.createElement("input");
+            input.className = `schedule-time ${className}`;
+            input.type = "time";
+            input.value = String(value || "");
+            input.setAttribute("aria-label", `${DAY_LABELS[day]} ${suffix} time`);
+            input.disabled = !window.enabled;
+            return input;
+        };
+        row.append(label, timeInput("day-start", window.start, "start"), timeInput("day-end", window.end, "end"));
+        return row;
+    }));
     elements.weeklySchedule.querySelectorAll(".day-enabled").forEach(toggle => toggle.addEventListener("change", event => {
         event.target.closest(".schedule-row").querySelectorAll(".schedule-time").forEach(input => { input.disabled = !event.target.checked; });
     }));

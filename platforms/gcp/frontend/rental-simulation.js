@@ -25,6 +25,10 @@ const elements = { workspace: document.querySelector(".simulation-workspace"), r
 const map = L.map("map", { zoomControl: true, attributionControl: true }).setView([47.6300, -122.3364], 15);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "&copy; OpenStreetMap contributors" }).addTo(map);
 
+function escapeHtml(value) {
+    return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
+}
+
 function interpolate(points, progress) {
     const scaled = Math.max(0, Math.min(.99999, progress)) * (points.length - 1);
     const index = Math.floor(scaled); const fraction = scaled - index; const start = points[index]; const end = points[index + 1];
@@ -46,7 +50,7 @@ function addActivity(message) { state.activity.unshift({ message, at: state.elap
 function showToast(title, message, action) {
     const toast = document.createElement("div");
     toast.className = "toast";
-    toast.innerHTML = `<div><strong>${title}</strong>${message}</div>`;
+    toast.innerHTML = `<div><strong>${escapeHtml(title)}</strong>${escapeHtml(message)}</div>`;
     if (action) {
         const actionButton = document.createElement("button");
         actionButton.className = "toast-action";
@@ -116,7 +120,7 @@ function renderFleet() {
         const action = rented ? "check-in" : "check-out";
         const label = rented ? "Check-In" : "Check-Out";
         const status = statusFor(boat);
-        return `<tr class="${boat.id === state.selectedId ? "selected" : ""}" data-boat-id="${boat.id}"><td><button class="dock-action ${action === "check-in" ? "check-in" : ""}" data-action="${action}" data-boat-id="${boat.id}" type="button" ${rented && !manualRental ? "disabled" : ""}>${label}</button></td><td><span class="boat-name">${boat.name.replace("Rowboat ", "")}</span><span class="boat-phase ${boat.late ? "late" : ""}">${boat.late ? "Running late" : PHASES[boat.phase].label}</span></td><td><span class="boat-status ${status.toLowerCase()}">${status}</span></td><td>${boat.guest ? boat.guest.name : "-"}</td><td>${boat.guest ? boat.guest.passengers : "-"}</td></tr>`;
+        return `<tr class="${boat.id === state.selectedId ? "selected" : ""}" data-boat-id="${boat.id}"><td><button class="dock-action ${action === "check-in" ? "check-in" : ""}" data-action="${action}" data-boat-id="${boat.id}" type="button" ${rented && !manualRental ? "disabled" : ""}>${label}</button></td><td><span class="boat-name">${escapeHtml(boat.name.replace("Rowboat ", ""))}</span><span class="boat-phase ${boat.late ? "late" : ""}">${boat.late ? "Running late" : PHASES[boat.phase].label}</span></td><td><span class="boat-status ${status.toLowerCase()}">${status}</span></td><td>${boat.guest ? escapeHtml(boat.guest.name) : "-"}</td><td>${boat.guest ? boat.guest.passengers : "-"}</td></tr>`;
     }).join("");
     elements.fleetList.querySelectorAll("tr").forEach(row => row.addEventListener("click", () => { state.selectedId = row.dataset.boatId; render(); map.flyTo(state.boats.get(state.selectedId).location, 15, { duration: .5 }); }));
     elements.fleetList.querySelectorAll(".dock-action").forEach(button => button.addEventListener("click", event => { event.stopPropagation(); if (button.dataset.action === "check-in") checkInBoat(button.dataset.boatId); else openRentalModal(button.dataset.boatId); }));
@@ -139,9 +143,9 @@ function renderMap() {
 function renderDetails() {
     const boat = state.boats.get(state.selectedId); if (!boat) return;
     const guest = boat.guest;
-    elements.selectedBoat.innerHTML = `<p class="eyebrow">${PHASES[boat.phase].label}</p><h3>${boat.name}</h3><p>${guest ? `${guest.name} · ${guest.passengers} passengers · ${guest.phone}` : "Docked and ready for the next rental."}</p><strong>${guest ? "TRACKING ACTIVE" : "TRACKING OFF"}</strong>`;
+    elements.selectedBoat.innerHTML = `<p class="eyebrow">${PHASES[boat.phase].label}</p><h3>${escapeHtml(boat.name)}</h3><p>${guest ? `${escapeHtml(guest.name)} · ${guest.passengers} passengers · ${escapeHtml(guest.phone)}` : "Docked and ready for the next rental."}</p><strong>${guest ? "TRACKING ACTIVE" : "TRACKING OFF"}</strong>`;
 }
-function renderActivity() { elements.activityList.innerHTML = state.activity.map(entry => `<li><span>${entry.message}</span><time>${formatClock(entry.at)}</time></li>`).join(""); elements.simulationTime.textContent = formatClock(state.elapsed); }
+function renderActivity() { elements.activityList.innerHTML = state.activity.map(entry => `<li><span>${escapeHtml(entry.message)}</span><time>${formatClock(entry.at)}</time></li>`).join(""); elements.simulationTime.textContent = formatClock(state.elapsed); }
 function formatClock(seconds) { const total = Math.floor(seconds * 2.5); return `${String(12 + Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`; }
 function render() { renderFleet(); renderMap(); renderDetails(); renderActivity(); }
 function checkoutDetailsAreComplete() {

@@ -37,8 +37,14 @@ test.before(async () => {
       tracking_enabled: false,
       booked: false
     });
-    await db.doc('users/user-1').set({ email: 'user-1@cwb.org', role: 'staff' });
-    await db.doc('users/user-2').set({ email: 'user-2@cwb.org', role: 'staff' });
+    await db.doc('users/user-1').set({ email: 'user-1@cwb.org', role: 'staff', functionLevel: 'operations', status: 'active' });
+    await db.doc('users/user-2').set({ email: 'user-2@cwb.org', role: 'staff', functionLevel: 'operations', status: 'active' });
+    await db.doc('users/manager-1').set({ email: 'manager-1@cwb.org', role: 'manager', functionLevel: 'operations', status: 'active' });
+    await db.doc('users/staff-1').set({ email: 'staff-1@cwb.org', role: 'staff', functionLevel: 'operations', status: 'active' });
+    await db.doc('users/volunteer-1').set({ email: 'volunteer-1@cwb.org', role: 'volunteer', functionLevel: 'operations', status: 'active' });
+    await db.doc('users/admin-1').set({ email: 'admin-1@cwb.org', role: 'admin', functionLevel: 'administration', status: 'active' });
+    await db.doc('users/suspended-1').set({ email: 'suspended-1@cwb.org', role: 'staff', functionLevel: 'operations', status: 'suspended' });
+    await db.doc('users/demoted-1').set({ email: 'demoted-1@cwb.org', role: 'volunteer', functionLevel: 'operations', status: 'active' });
   });
 });
 
@@ -53,11 +59,17 @@ test('anonymous and unassigned users cannot read operational data', async () => 
   await assertFails(getDoc(doc(authenticatedDb('unassigned'), 'boats/70b3d57ed0000001')));
 });
 
-test('assigned operations roles can read operational data', async () => {
-  for (const role of ['manager', 'staff', 'volunteer']) {
+test('assigned staff operations roles can read operational data', async () => {
+  for (const role of ['manager', 'staff']) {
     const db = authenticatedDb(`${role}-1`, { role, functionLevel: 'operations' });
     await assertSucceeds(getDoc(doc(db, 'boats/70b3d57ed0000001')));
   }
+});
+
+test('volunteers cannot retrieve documents containing renter identity or precise location', async () => {
+  const volunteerDb = authenticatedDb('volunteer-1', { role: 'volunteer', functionLevel: 'operations' });
+  await assertFails(getDoc(doc(volunteerDb, 'boats/70b3d57ed0000001')));
+  await assertFails(getDocs(collection(volunteerDb, 'boats/70b3d57ed0000001/history')));
 });
 
 test('rental updates require an operations role and TOTP', async () => {
@@ -85,5 +97,18 @@ test('users can read only their own profile while MFA admins can list users', as
     firebase: { sign_in_second_factor: 'totp' }
   });
   const result = await assertSucceeds(getDocs(collection(adminDb, 'users')));
-  assert.equal(result.size, 2);
+  assert.equal(result.size, 8);
+});
+
+test('live profiles override stale privileged token claims', async () => {
+  const staleStaffToken = { role: 'staff', functionLevel: 'operations' };
+  await assertFails(getDoc(doc(authenticatedDb('suspended-1', staleStaffToken), 'boats/70b3d57ed0000001')));
+  await assertFails(getDoc(doc(authenticatedDb('demoted-1', staleStaffToken), 'boats/70b3d57ed0000001')));
+
+  const staleAdminToken = {
+    admin: true,
+    role: 'admin',
+    firebase: { sign_in_second_factor: 'totp' }
+  };
+  await assertFails(getDocs(collection(authenticatedDb('demoted-1', staleAdminToken), 'users')));
 });

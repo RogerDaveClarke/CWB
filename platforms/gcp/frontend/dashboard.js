@@ -432,7 +432,7 @@ async function startFirebase() {
         return;
     }
     try {
-        await initAuthGuard({ roles: ["admin", "manager", "staff", "volunteer"], functionLevels: ["operations"], requireMfa: true }, {
+        await initAuthGuard({ roles: ["admin", "manager", "staff"], functionLevels: ["operations"], requireMfa: true }, {
             onReady: ({ user, claims, db }) => {
                 state.db = db;
                 state.user = user;

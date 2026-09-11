@@ -5,26 +5,38 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function hasActiveProfile() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'active';
+    }
+
+    function liveRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function liveFunctionLevel() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.functionLevel;
+    }
+
     function isAdmin() {
-      return request.auth != null
-        && (request.auth.token.get('admin', false) == true
-          || request.auth.token.get('role', '') == 'admin')
+      return hasActiveProfile()
+        && liveRole() == 'admin'
         && request.auth.token.get('firebase', {}).get('sign_in_second_factor', '') == 'totp';
     }
 
     function hasOperationsAccess() {
       return isAdmin()
-        || (isSignedIn()
-          && request.auth.token.get('role', '') in ['manager', 'staff', 'volunteer']
-          && request.auth.token.get('functionLevel', '') == 'operations');
+        || (hasActiveProfile()
+          && liveRole() in ['manager', 'staff']
+          && liveFunctionLevel() == 'operations');
     }
 
     function hasMfaOperationsAccess() {
-      return request.auth != null
-        && (request.auth.token.get('admin', false) == true
-          || request.auth.token.get('role', '') == 'admin'
-          || (request.auth.token.get('role', '') in ['manager', 'staff']
-            && request.auth.token.get('functionLevel', '') == 'operations'))
+      return hasActiveProfile()
+        && (liveRole() == 'admin'
+          || (liveRole() in ['manager', 'staff']
+            && liveFunctionLevel() == 'operations'))
         && request.auth.token.get('firebase', {}).get('sign_in_second_factor', '') == 'totp';
     }
 

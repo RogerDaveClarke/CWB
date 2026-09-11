@@ -176,6 +176,9 @@ for (const control of [
 ]) {
   if (!boatConfigSource.includes(control)) failures.push(`pushBoatConfig is missing control: ${control}`);
 }
+if (/error\.message|response\.text\(/.test(boatConfigSource)) {
+  failures.push('pushBoatConfig reflects internal gateway errors to clients.');
+}
 if (!webhookSource.includes("serviceAccount: 'cwb-telemetry-ingest@cwb-boat-operations-c50dd.iam.gserviceaccount.com'")) {
   failures.push('telemetryIngest is missing its dedicated service account.');
 }
@@ -198,6 +201,26 @@ for (const header of [
 if (!firebaseConfig.includes("script-src 'self' https://www.gstatic.com https://apis.google.com")) {
   failures.push('Firebase Hosting CSP blocks the Google API script required by Firebase Auth.');
 }
+for (const forbiddenOrigin of ['https://unpkg.com', 'https://api.qrserver.com']) {
+  if (firebaseConfig.includes(forbiddenOrigin)) failures.push(`Firebase Hosting trusts unnecessary third-party origin: ${forbiddenOrigin}`);
+}
+const mfaSource = read('platforms/gcp/frontend/mfa.js');
+if (!mfaSource.includes('window.qrcode') || /qrserver\.com/.test(mfaSource)) {
+  failures.push('MFA QR generation is not fully local.');
+}
+const simulationHtml = read('platforms/gcp/frontend/rental-simulation.html');
+if (/https:\/\/unpkg\.com/.test(simulationHtml)) failures.push('Rental simulation executes CDN assets.');
+if (/https:\/\/fonts\.(?:googleapis|gstatic)\.com/.test(simulationHtml)) failures.push('Rental simulation sends browser metadata to third-party font services.');
+const usersSource = read('platforms/gcp/frontend/users.js');
+if (/sessionStorage\.(?:getItem|setItem)\([^)]*roster/i.test(usersSource)) {
+  failures.push('Account roster PII is cached in sessionStorage.');
+}
+if (firebaseConfig.includes('{ "source": "**", "destination": "/index.html" }')) {
+  failures.push('Firebase Hosting masks unknown and sensitive-looking paths with a 200 SPA fallback.');
+}
+if (!firebaseConfig.includes('"value": "no-store, max-age=0"')) {
+  failures.push('Firebase Hosting permits stale security-sensitive pages or assets.');
+}
 
 const retentionSource = read('platforms/gcp/cloud-ingest/retention.js');
 for (const control of [
@@ -215,7 +238,9 @@ if (/allow\s+(?:read|get|list)(?:\s*,\s*(?:read|get|list))*\s*:\s*if\s+true\s*;/
   failures.push('Firestore contains an anonymously readable collection.');
 }
 for (const control of [
-  "request.auth.token.get('admin', false) == true",
+  'function hasActiveProfile()',
+  "get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'active'",
+  "liveRole() == 'admin'",
   "request.auth.token.get('firebase', {}).get('sign_in_second_factor', '') == 'totp'",
   'function hasOperationsAccess()',
   'allow read: if hasOperationsAccess();'
@@ -224,6 +249,10 @@ for (const control of [
 }
 if (/allow\s+read\s*:\s*if\s+isSignedIn\(\)\s*;/.test(firestoreRules)) {
   failures.push('Firestore operational data is readable by authenticated accounts without an assigned role.');
+}
+const operationsAccess = firestoreRules.match(/function hasOperationsAccess\(\)\s*\{([\s\S]*?)\n\s*\}/)?.[1] || '';
+if (/['"]volunteer['"]/.test(operationsAccess)) {
+  failures.push('Volunteer accounts can retrieve documents containing renter identity or precise location.');
 }
 
 for (const workflow of ['.github/workflows/privacy-gate.yml', '.github/workflows/codeql.yml']) {

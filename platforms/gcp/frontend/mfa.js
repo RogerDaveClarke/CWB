@@ -30,18 +30,18 @@ function show(panel) {
     }
 }
 
-// Render a QR code as an image using the otpauth URL
+// Render the MFA seed entirely in-browser so it never reaches a QR service.
 function renderQr(otpauthUrl) {
-    qrBox.innerHTML = "";
+    qrBox.replaceChildren();
+    const qr = window.qrcode(0, "M");
+    qr.addData(otpauthUrl);
+    qr.make();
     const img = document.createElement("img");
     img.alt = "Scan with your authenticator app";
     img.width = 160;
     img.height = 160;
     img.className = "rounded block";
-    img.src = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&margin=0&data=${encodeURIComponent(otpauthUrl)}`;
-    img.onerror = () => {
-        qrBox.innerHTML = `<div class="w-40 h-40 flex items-center justify-center text-center p-2 text-xs text-zinc-500">QR preview unavailable.<br>Use the manual key.</div>`;
-    };
+    img.src = qr.createDataURL(4, 0);
     qrBox.appendChild(img);
 }
 
@@ -79,7 +79,7 @@ function setupCodeInput() {
 }
 
 async function startEnrollment(user) {
-    statusEl.innerHTML = `Setting up 2FA for <strong class="text-zinc-200">${user.email || user.uid}</strong>`;
+    statusEl.textContent = `Setting up 2FA for ${user.email || user.uid}`;
     if (mfaAccountEmail) mfaAccountEmail.textContent = user.email || user.uid;
     setConnection("live", "Ready to enroll");
     show(enrollPanel);

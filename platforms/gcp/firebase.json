@@ -11,14 +11,13 @@
       { "source": "/history", "destination": "/history.html" },
       { "source": "/users", "destination": "/users.html" },
       { "source": "/mfa", "destination": "/mfa.html" },
-      { "source": "/rental-simulation", "destination": "/rental-simulation.html" },
-      { "source": "**", "destination": "/index.html" }
+      { "source": "/rental-simulation", "destination": "/rental-simulation.html" }
     ],
     "headers": [
       {
         "source": "**",
         "headers": [
-          { "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' https://www.gstatic.com https://apis.google.com https://www.google.com https://www.recaptcha.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.tile.openstreetmap.org https://api.qrserver.com; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.cloudfunctions.net https://www.google.com https://www.recaptcha.net; frame-src https://*.firebaseapp.com https://accounts.google.com https://www.google.com https://www.recaptcha.net; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests" },
+          { "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' https://www.gstatic.com https://apis.google.com https://www.google.com https://www.recaptcha.net; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://*.tile.openstreetmap.org; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.cloudfunctions.net https://www.google.com https://www.recaptcha.net; frame-src https://*.firebaseapp.com https://accounts.google.com https://www.google.com https://www.recaptcha.net; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests" },
           { "key": "Cross-Origin-Opener-Policy", "value": "same-origin-allow-popups" },
           { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
           { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=(), payment=(), usb=()" },
@@ -28,15 +27,9 @@
         ]
       },
       {
-        "source": "**/*.@(js|css|html)",
+        "source": "**",
         "headers": [
-          { "key": "Cache-Control", "value": "no-cache, max-age=0, must-revalidate" }
-        ]
-      },
-      {
-        "source": "/vendor/**",
-        "headers": [
-          { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+          { "key": "Cache-Control", "value": "no-store, max-age=0" }
         ]
       }
     ]

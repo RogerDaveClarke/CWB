@@ -58,7 +58,6 @@ const state = {
     authoritativeLoaded: false
 };
 
-const ROSTER_CACHE_KEY = "cwb_users_roster";
 
 function escapeHtml(value) {
     return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
@@ -202,37 +201,28 @@ async function loadUsers() {
         const result = await callFunction("listUsers", {});
         state.users = result.data.users || [];
         state.authoritativeLoaded = true;
-        try {
-            sessionStorage.setItem(ROSTER_CACHE_KEY, JSON.stringify(state.users));
-        } catch { /* quota/serialization issues are non-fatal */ }
         updateKPIs(state.users);
         renderUsers();
         setConnection("live", "Admin access");
-    } catch (error) {
-        console.error("listUsers failed", error);
+    } catch {
+        console.error("Account list request failed.");
         // A fast render may already be showing usable data; only surface the
         // failure state when the table would otherwise be empty.
         if (!state.users.length) {
             setConnection("error", "Failed to load");
-            tableBody.innerHTML = `<tr><td colspan="9" class="empty-cell text-red-400">Unable to load accounts: ${escapeHtml(error.message || "Access denied")}</td></tr>`;
+            const row = document.createElement("tr");
+            const cell = document.createElement("td");
+            cell.colSpan = 9;
+            cell.className = "empty-cell text-red-400";
+            cell.textContent = "Unable to load accounts. Access denied.";
+            row.appendChild(cell);
+            tableBody.replaceChildren(row);
         } else {
             setConnection("live", "Admin access");
         }
     }
 }
 
-// Instant paint from this tab's last authoritative roster, if any.
-function primeUsersFromCache() {
-    if (state.authoritativeLoaded || state.users.length) return;
-    try {
-        const cached = JSON.parse(sessionStorage.getItem(ROSTER_CACHE_KEY) || "null");
-        if (Array.isArray(cached) && cached.length) {
-            state.users = cached;
-            updateKPIs(state.users);
-            renderUsers();
-        }
-    } catch { /* ignore bad cache */ }
-}
 
 // Fast first load straight from the Firestore users collection (no Cloud
 // Function cold start). Admin clients are allowed to list it by the security
@@ -562,9 +552,6 @@ async function init() {
             authActionButton.innerHTML = `<i data-lucide="log-out" class="h-4 w-4"></i><span>${escapeHtml(user.displayName || user.email || "Sign out")}</span>`;
             if (window.lucide) window.lucide.createIcons();
 
-            // Instant paint from cache, fast paint from Firestore, then the
-            // authoritative Auth-merged roster reconciles on arrival.
-            primeUsersFromCache();
             loadUsersFast();
             loadUsers();
         },
@@ -588,6 +575,8 @@ async function init() {
         },
         onSignedOut: () => {
             state.currentUser = null;
+            state.users = [];
+            state.authoritativeLoaded = false;
             adminPanel.classList.add("hidden");
             deniedPanel.classList.remove("hidden");
             deniedText.textContent = "Sign in with an Administrator account is required.";
