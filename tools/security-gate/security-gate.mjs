@@ -195,6 +195,9 @@ for (const header of [
 ]) {
   if (!firebaseConfig.includes(`"key": "${header}"`)) failures.push(`Firebase Hosting is missing security header: ${header}`);
 }
+if (!firebaseConfig.includes("script-src 'self' https://www.gstatic.com https://apis.google.com")) {
+  failures.push('Firebase Hosting CSP blocks the Google API script required by Firebase Auth.');
+}
 
 const retentionSource = read('platforms/gcp/cloud-ingest/retention.js');
 for (const control of [
