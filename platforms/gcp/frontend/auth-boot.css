@@ -1,0 +1,7 @@
+html.auth-pending body {
+    background: #09090b;
+}
+
+html.auth-pending body > :not(#cwbAuthModalOverlay) {
+    visibility: hidden !important;
+}

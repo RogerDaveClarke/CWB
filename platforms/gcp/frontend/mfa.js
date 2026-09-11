@@ -1,4 +1,4 @@
-import { getFirebase, beginTotpEnrollment, completeTotpEnrollment, reauthenticate, isConfigValid } from "./auth-guard.js";
+import { getFirebase, beginTotpEnrollment, completeTotpEnrollment, reauthenticate, isConfigValid, revealProtectedPage } from "./auth-guard.js";
 
 const statusEl = document.getElementById("mfaStatus");
 const mfaConnection = document.getElementById("mfaConnection");
@@ -154,11 +154,13 @@ async function init() {
     if (!isConfigValid()) {
         statusEl.textContent = "Firebase is not configured. Check configuration.";
         setConnection("error", "Config error");
+        revealProtectedPage();
         return;
     }
 
     const { auth, authModule } = await getFirebase();
     authModule.onAuthStateChanged(auth, async (user) => {
+        revealProtectedPage();
         if (!user) {
             statusEl.textContent = "";
             setConnection("", "Signed out");
@@ -198,5 +200,9 @@ async function init() {
     });
 }
 
-init();
+init().catch(() => {
+    statusEl.textContent = "Authentication could not be initialized. Please refresh and try again.";
+    setConnection("error", "Authentication error");
+    revealProtectedPage();
+});
 

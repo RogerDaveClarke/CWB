@@ -132,6 +132,21 @@ Remediation and verification:
 - Emulator tests prove suspended and demoted profiles are denied even when requests carry stale staff or administrator claims.
 - Production profile readiness was checked by aggregate counts only before deployment; no identity or profile data was printed.
 
+### PT-010: Protected Content Visible Before Authentication Resolved
+
+**Severity:** Medium
+
+Protected HTML rendered before the asynchronous Firebase authorization callback displayed the sign-in modal. A signed-out visitor could briefly see page structure or stale browser-rendered content.
+
+Remediation and verification:
+
+- Protected documents carry an `auth-pending` marker from the first HTML parse and load a render-blocking same-origin stylesheet.
+- All body content except the auth modal remains hidden while signed out, denied, or pending.
+- The shared guard reveals content only after authorization succeeds; the MFA page reveals only after its Firebase state resolves.
+- The penetration gate verifies every protected page and the authorized reveal path.
+- With the Firebase Auth module deliberately delayed by 2.5 seconds, the history application container remained `visibility:hidden`; after signed-out resolution, it remained hidden while only the sign-in modal became visible.
+- The MFA page removed `auth-pending` only after Firebase resolved and displayed its safe signed-out state.
+
 ## Black-Box Boundary Results
 
 - Telemetry endpoint: GET and OPTIONS returned 405; POST without token returned 403; wrong content type returned 415.

@@ -17,6 +17,10 @@ export function isConfigValid() {
     return Boolean(firebaseConfig.projectId) && !firebaseConfig.projectId.startsWith("your-") && Boolean(firebaseConfig.apiKey);
 }
 
+export function revealProtectedPage() {
+    document.documentElement.classList.remove("auth-pending");
+}
+
 async function loadModules() {
     // Fetched in parallel: these are four independent requests to gstatic and
     // awaiting them one at a time serialised the whole page start-up.
@@ -583,6 +587,7 @@ export async function initAuthGuard(spec, { onReady, onDenied, onSignedOut }) {
             }
 
             if (check.ok) {
+                revealProtectedPage();
                 hideAuthModal();
                 // Record/increment login session in Firestore users collection.
                 // Deliberately not awaited: the page has everything it needs to
