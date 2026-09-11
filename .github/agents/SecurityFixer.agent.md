@@ -44,6 +44,7 @@ Review every applicable domain, even when the user asks about only one control:
 10. Require immutable GitHub Action SHAs, least workflow permissions, current CycloneDX SBOM evidence, expiring accepted risks, quarterly access review, twice-yearly incident exercise, and quarterly restore evidence.
 11. Before release, run `npm run security:cloud` against the intended project. Require all 13 workloads ACTIVE on Node 22 with their expected identities, exact IAM roles, enabled secret versions/bindings, Firestore App Check enforcement, scheduled retention, Data Access logs, two alert policies, and 365-day audit retention.
 12. Verify the deployed frontend returns the configured App Check key and CSP, HSTS, nosniff, frame, referrer, and permissions headers. Verify actual cloud state after deployment; successful CLI exit alone is insufficient.
+13. Run `node tools/pentest-gate/pentest-gate.mjs` for every change. Invoke the penetration-testing workflow for new public surfaces, authentication/authorization changes, sensitive browser data flows, third-party origins, Firestore Rules, webhook behavior, or before release. Any unresolved penetration finding blocks commit and release.
 
 ## Rules
 

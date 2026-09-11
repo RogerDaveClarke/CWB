@@ -18,6 +18,9 @@ echo "Security gate: checking CWB privacy controls"
 echo "Security gate: checking GCP endpoint authentication"
 (cd "$staged_tree" && node tools/security-gate/security-gate.mjs)
 
+echo "Security gate: checking penetration-test regressions"
+(cd "$staged_tree" && node tools/pentest-gate/pentest-gate.mjs)
+
 if git diff --cached --name-only | grep -Eq '^platforms/gcp/cloud-ingest/(.*\.js|package(-lock)?\.json)$'; then
     echo "Security gate: testing GCP endpoint authentication"
     if [ ! -d "$root/platforms/gcp/cloud-ingest/node_modules" ]; then
@@ -54,4 +57,28 @@ if git diff --cached --name-only | grep -q '^firmware/'; then
         exit 1
     fi
     "$platformio_python" -m platformio check --project-dir "$staged_tree/firmware" --skip-packages --src-filters '+<src/>' --silent
+fi
+
+if git diff --cached --name-only | grep -Eq '^platforms/gcp/(firestore\.rules|cloud-ingest/test/firestore\.rules\.test\.js)$'; then
+    echo "Security gate: testing Firestore authorization boundaries"
+    if [ ! -d "$root/platforms/gcp/cloud-ingest/node_modules" ]; then
+        echo "Security gate: run npm ci in platforms/gcp/cloud-ingest before committing" >&2
+        exit 1
+    fi
+    java_bin=$(command -v java || true)
+    if [ -z "$java_bin" ]; then
+        for candidate in "$HOME"/.vscode/extensions/redhat.java-*/jre/*/bin/java.exe; do
+            if [ -x "$candidate" ]; then
+                java_bin="$candidate"
+                export JAVA_HOME="$(dirname "$(dirname "$java_bin")")"
+                export PATH="$(dirname "$java_bin"):$PATH"
+                break
+            fi
+        done
+    fi
+    if [ -z "$java_bin" ]; then
+        echo "Security gate: Java is required for Firestore authorization tests" >&2
+        exit 1
+    fi
+    (cd "$staged_tree/platforms/gcp" && NODE_PATH="$root/platforms/gcp/cloud-ingest/node_modules" npx --yes firebase-tools@15.30.0 emulators:exec --only firestore --project demo-cwb-security-rules "npm --prefix cloud-ingest run test:rules")
 fi

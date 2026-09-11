@@ -5,6 +5,7 @@
     "dev": "node tools/dev-server.mjs",
     "privacy-gate": "node tools/privacy-gate/privacy-gate.mjs",
     "security-gate": "node tools/security-gate/security-gate.mjs",
+    "pentest-gate": "node tools/pentest-gate/pentest-gate.mjs",
     "security:cloud": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/security-gate/verify-gcp-posture.ps1",
     "deploy": "node tools/deploy.mjs"
   },
