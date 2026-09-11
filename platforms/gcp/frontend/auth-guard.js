@@ -228,18 +228,12 @@ function injectModalStyles() {
             text-align: center !important;
         }
         .cwb-auth-badge {
-            display: inline-flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-            width: 52px !important;
+            display: block !important;
+            width: auto !important;
             height: 52px !important;
-            border-radius: 14px !important;
-            background: #2563eb !important;
-            color: #ffffff !important;
-            font-weight: 700 !important;
-            font-size: 1.25rem !important;
+            max-width: 100% !important;
+            object-fit: contain !important;
             margin: 0 auto 0.75rem auto !important;
-            box-shadow: 0 4px 10px -1px rgba(37, 99, 235, 0.4) !important;
         }
         .cwb-auth-title {
             font-size: 1.35rem !important;
@@ -377,7 +371,7 @@ function ensureAuthModal() {
     modalEl.className = "cwb-hidden";
     modalEl.innerHTML = `
         <div class="cwb-auth-card">
-            <div class="cwb-auth-badge">CWB</div>
+            <img class="cwb-auth-badge" src="./assets/CWBLogo.png" alt="The Center for Wooden Boats">
             <h2 class="cwb-auth-title" id="authModalTitle">Sign in to CWB Operations</h2>
             <p class="cwb-auth-subtitle">Center for Wooden Boats Fleet Management</p>
 
