@@ -166,6 +166,7 @@ exports.deleteUser = userAdmin.deleteUser;
 exports.resetUserMfa = userAdmin.resetUserMfa;
 exports.listUsers = userAdmin.listUsers;
 exports.claimDefaultRole = userAdmin.claimDefaultRole;
+exports.reportSessionExit = userAdmin.reportSessionExit;
 exports.checkInBoat = userAdmin.checkInBoat;
 
 // Boat tracker configuration downlinks via the ChirpStack LoRaWAN gateway.
@@ -174,3 +175,6 @@ exports.pushBoatConfig = boatConfig.pushBoatConfig;
 
 const retention = require('./retention');
 exports.purgeExpiredTrails = retention.purgeExpiredTrails;
+
+const identityReconciliation = require('./identityReconciliation');
+exports.reconcileIdentityState = identityReconciliation.reconcileIdentityState;

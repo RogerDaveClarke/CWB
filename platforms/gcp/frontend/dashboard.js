@@ -132,7 +132,7 @@ function dockActionContent(boat, status) {
     if (state.isVolunteer) return `<span class="text-xs text-zinc-400 font-medium">Monitor only</span>`;
     if (status === "maintenance") return `<button class="dock-action" type="button" disabled>Unavailable</button>`;
     const isOut = status === "rented" || status === "overdue";
-    return `<button class="dock-action ${isOut ? "check-in" : "check-out"}" type="button" data-action="${isOut ? "check-in" : "check-out"}" data-boat-id="${escapeHtml(boat.id)}"><i data-lucide="${isOut ? "log-in" : "log-out"}" class="h-3 w-3"></i>${isOut ? "Check in" : "Check out"}</button>`;
+    return `<button class="dock-action ${isOut ? "check-in" : "check-out"}" type="button" data-action="${isOut ? "check-in" : "check-out"}" data-boat-id="${escapeHtml(boat.id)}" aria-label="${isOut ? "Check in" : "Check out"} ${escapeHtml(boat.name)}"><i data-lucide="${isOut ? "log-in" : "log-out"}" class="h-3 w-3"></i>${isOut ? "Check in" : "Check out"}</button>`;
 }
 function visibleColumns() { return state.columnOrder.filter(id => !state.hiddenColumns.has(id)).map(id => COLUMN_DEFINITIONS.find(column => column.id === id)); }
 function saveTablePreferences() { localStorage.setItem(TABLE_PREFERENCES_KEY, JSON.stringify({ order: state.columnOrder, hidden: [...state.hiddenColumns], sort: state.sort })); }
@@ -445,6 +445,7 @@ async function startFirebase() {
                 elements.signIn.classList.remove("hidden");
                 elements.signIn.innerHTML = `<i data-lucide="log-out" class="h-4 w-4"></i>`;
                 elements.signIn.title = `Sign out ${user.displayName || user.email || ""}`.trim();
+                elements.signIn.setAttribute("aria-label", elements.signIn.title);
                 lucide.createIcons();
 
                 onSnapshot(collection(db, "boats"), snapshot => {

@@ -233,6 +233,18 @@ for (const control of [
   if (!retentionSource.includes(control)) failures.push(`Scheduled retention is missing control: ${control}`);
 }
 
+const reconciliationSource = read('platforms/gcp/cloud-ingest/identityReconciliation.js');
+for (const control of [
+  "schedule: 'every 1 hours'",
+  "serviceAccount: 'cwb-user-admin@cwb-boat-operations-c50dd.iam.gserviceaccount.com'",
+  "logSecurityEvent('identity_state_mismatch'"
+]) {
+  if (!reconciliationSource.includes(control)) failures.push(`Identity reconciliation is missing control: ${control}`);
+}
+if (!authGuardSource.includes('httpsCallable(functions, "reportSessionExit")')) {
+  failures.push('Forced browser exits are not reported before local sign-out.');
+}
+
 const firestoreRules = read('platforms/gcp/firestore.rules');
 if (/allow\s+(?:read|get|list)(?:\s*,\s*(?:read|get|list))*\s*:\s*if\s+true\s*;/.test(firestoreRules)) {
   failures.push('Firestore contains an anonymously readable collection.');
@@ -267,7 +279,9 @@ for (const metric of [
   'cwb_webhook_rejections',
   'cwb_callable_auth_denials',
   'cwb_unknown_devices',
-  'cwb_retention_failures'
+  'cwb_retention_failures',
+  'cwb_identity_state_mismatches',
+  'cwb_forced_session_exits'
 ]) {
   if (!alertPolicy.includes(metric)) failures.push(`Security alert policy is missing metric: ${metric}`);
 }

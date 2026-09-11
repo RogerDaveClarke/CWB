@@ -175,6 +175,20 @@ Remediation and verification:
 - Firebase Hosting internally rewrites clean routes to static files and permanently redirects legacy `.html` URLs to canonical paths.
 - The penetration gate rejects user-facing `.html` links and missing canonical redirects.
 
+### PT-013: Identity Lifecycle Drift Lacked Scheduled Detection
+
+**Severity:** Medium
+
+Profile-first revocation fails closed, but partial backend failures can leave Firebase Auth and Firestore profile state inconsistent. Browser ejection events also lacked centralized evidence.
+
+Remediation and verification:
+
+- An hourly scheduled workload compares every Firebase Auth user with Firestore profile status, role, function level, and admin claim.
+- Missing profiles, missing Auth users, disabled/status mismatch, and claim/profile mismatch emit pseudonymous `ERROR` security events.
+- Forced browser exits send a best-effort App Check-protected pseudonymous event before local sign-out and reload.
+- Log-based metrics and alert-policy conditions cover identity mismatches and repeated forced exits.
+- Unit tests cover matching state and each mismatch category.
+
 ## Black-Box Boundary Results
 
 - Telemetry endpoint: GET and OPTIONS returned 405; POST without token returned 403; wrong content type returned 415.

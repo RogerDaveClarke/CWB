@@ -70,6 +70,7 @@ function setupCodeInput() {
             // fallback
             const textarea = document.createElement("textarea");
             textarea.value = key;
+            textarea.setAttribute("aria-label", "Manual setup key for clipboard copy");
             document.body.appendChild(textarea);
             textarea.select();
             document.execCommand("copy");

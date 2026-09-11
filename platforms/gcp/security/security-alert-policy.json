@@ -57,6 +57,30 @@
           { "alignmentPeriod": "300s", "perSeriesAligner": "ALIGN_SUM", "crossSeriesReducer": "REDUCE_SUM" }
         ]
       }
+    },
+    {
+      "displayName": "Identity state mismatch",
+      "conditionThreshold": {
+        "filter": "resource.type=\"cloud_run_revision\" AND metric.type=\"logging.googleapis.com/user/cwb_identity_state_mismatches\"",
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 0,
+        "duration": "0s",
+        "aggregations": [
+          { "alignmentPeriod": "300s", "perSeriesAligner": "ALIGN_SUM", "crossSeriesReducer": "REDUCE_SUM" }
+        ]
+      }
+    },
+    {
+      "displayName": "Forced browser session exit",
+      "conditionThreshold": {
+        "filter": "resource.type=\"cloud_run_revision\" AND metric.type=\"logging.googleapis.com/user/cwb_forced_session_exits\"",
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 5,
+        "duration": "0s",
+        "aggregations": [
+          { "alignmentPeriod": "300s", "perSeriesAligner": "ALIGN_SUM", "crossSeriesReducer": "REDUCE_SUM" }
+        ]
+      }
     }
   ]
 }

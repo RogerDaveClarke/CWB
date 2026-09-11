@@ -571,6 +571,11 @@ export async function initAuthGuard(spec, { onReady, onDenied, onSignedOut }) {
             stopProfileWatch();
             onDenied?.(reason, null, claims);
             try {
+                const reportExit = functionsModule.httpsCallable(functions, "reportSessionExit")({ reason });
+                await Promise.race([
+                    reportExit.catch(() => null),
+                    new Promise(resolve => setTimeout(resolve, 500))
+                ]);
                 await authModule.signOut(auth);
             } finally {
                 window.location.replace("/");

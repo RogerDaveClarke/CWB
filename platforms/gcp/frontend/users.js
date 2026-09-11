@@ -78,7 +78,60 @@ function formatDate(value) {
 
 function setConnection(mode, label) {
     connectionEl.className = `connection-pill ${mode}`;
-    connectionEl.innerHTML = `<span class="status-dot"></span><span class="hidden sm:inline">${escapeHtml(label)}</span>`;
+    const dot = document.createElement("span");
+    dot.className = "status-dot";
+    const text = document.createElement("span");
+    text.className = "hidden sm:inline";
+    text.textContent = label;
+    connectionEl.replaceChildren(dot, text);
+}
+
+function icon(name, className = "h-4 w-4") {
+    const element = document.createElement("i");
+    element.dataset.lucide = name;
+    element.className = className;
+    return element;
+}
+
+function setIconText(control, iconName, text) {
+    const label = document.createElement("span");
+    label.textContent = text;
+    control.replaceChildren(icon(iconName), label);
+}
+
+function tableMessage(message, className = "empty-cell") {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 9;
+    cell.className = className;
+    cell.textContent = message;
+    row.appendChild(cell);
+    tableBody.replaceChildren(row);
+}
+
+function span(className, text) {
+    const element = document.createElement("span");
+    element.className = className;
+    element.textContent = text;
+    return element;
+}
+
+function div(className, text = null) {
+    const element = document.createElement("div");
+    element.className = className;
+    if (text != null) element.textContent = text;
+    return element;
+}
+
+function userActionButton(className, title, iconName, iconClass = "h-4 w-4", disabled = false) {
+    const button = document.createElement("button");
+    button.className = `icon-button ${className}`;
+    button.type = "button";
+    button.title = title;
+    button.setAttribute("aria-label", title);
+    button.disabled = disabled;
+    button.appendChild(icon(iconName, iconClass));
+    return button;
 }
 
 function updateKPIs(users) {
@@ -124,11 +177,11 @@ function renderUsers() {
     state.filteredUsers = list;
 
     if (!list.length) {
-        tableBody.innerHTML = `<tr><td colspan="9" class="empty-cell">No user accounts found matching current filters.</td></tr>`;
+        tableMessage("No user accounts found matching current filters.");
         return;
     }
 
-    tableBody.innerHTML = list.map(user => {
+    tableBody.replaceChildren(...list.map(user => {
         const role = user.role || "volunteer";
         const roleBadgeClass = `badge-role-${role}`;
         const roleLabel = role.charAt(0).toUpperCase() + role.slice(1);
@@ -137,50 +190,64 @@ function renderUsers() {
         const isSuspended = user.status === "suspended" || user.disabled;
         const statusBadgeClass = isSuspended ? "badge-status-suspended" : "badge-status-active";
         const statusLabel = isSuspended ? "Suspended" : "Active";
-
         const mfaBadgeClass = user.mfaEnrolled ? "badge-mfa-yes" : "badge-mfa-no";
         const mfaLabel = user.mfaEnrolled ? "Enrolled" : "Not set";
-
         const isSelf = state.currentUser && state.currentUser.uid === user.uid;
+        const accountLabel = user.displayName || user.email || "this account";
 
-        return `<tr data-uid="${escapeHtml(user.uid)}">
-            <td>
-                <div class="font-bold text-zinc-100">${escapeHtml(user.displayName || "—")}</div>
-                ${isSelf ? '<span class="text-[10px] text-sky-400 font-medium">(You)</span>' : ''}
-            </td>
-            <td><span class="font-mono text-zinc-300 text-xs">${escapeHtml(user.email || "—")}</span></td>
-            <td>
-                <div class="truncate max-w-[200px] text-zinc-400 text-xs" title="${escapeHtml(user.address || "No address on file")}">
-                    ${escapeHtml(user.address || "—")}
-                </div>
-            </td>
-            <td><span class="badge-pill ${roleBadgeClass}">${escapeHtml(roleLabel)}</span></td>
-            <td><span class="text-xs text-zinc-300">${escapeHtml(func)}</span></td>
-            <td><span class="badge-pill ${mfaBadgeClass}">${escapeHtml(mfaLabel)}</span></td>
-            <td><span class="font-mono text-xs text-zinc-200">${user.loginCount || 0}</span></td>
-            <td><span class="badge-pill ${statusBadgeClass}">${escapeHtml(statusLabel)}</span></td>
-            <td>
-                <div class="flex items-center justify-end gap-1.5 whitespace-nowrap">
-                    <button class="icon-button edit-user" type="button" title="Edit account" aria-label="Edit account">
-                        <i data-lucide="pencil" class="h-4 w-4"></i>
-                    </button>
-                    <button class="icon-button reset-mfa" type="button" title="Reset 2FA" aria-label="Reset 2FA">
-                        <i data-lucide="shield-alert" class="h-4 w-4 text-sky-400"></i>
-                    </button>
-                    ${isSuspended
-                        ? `<button class="icon-button enable-user" type="button" title="Activate account" aria-label="Activate account">
-                               <i data-lucide="user-check" class="h-4 w-4 text-emerald-400"></i>
-                           </button>`
-                        : `<button class="icon-button suspend-user" type="button" title="Suspend account" aria-label="Suspend account" ${isSelf ? 'disabled' : ''}>
-                               <i data-lucide="user-x" class="h-4 w-4 text-amber-400"></i>
-                           </button>`}
-                    <button class="icon-button delete-user" type="button" title="Delete user" aria-label="Delete user" ${isSelf ? 'disabled' : ''}>
-                        <i data-lucide="trash-2" class="h-4 w-4 text-red-400"></i>
-                    </button>
-                </div>
-            </td>
-        </tr>`;
-    }).join("");
+        const row = document.createElement("tr");
+        row.dataset.uid = user.uid;
+
+        const nameCell = document.createElement("td");
+        nameCell.appendChild(div("font-bold text-zinc-100", user.displayName || "—"));
+        if (isSelf) nameCell.appendChild(span("text-[10px] text-sky-400 font-medium", "(You)"));
+        row.appendChild(nameCell);
+
+        const emailCell = document.createElement("td");
+        emailCell.appendChild(span("font-mono text-zinc-300 text-xs", user.email || "—"));
+        row.appendChild(emailCell);
+
+        const addressCell = document.createElement("td");
+        const address = div("truncate max-w-[200px] text-zinc-400 text-xs", user.address || "—");
+        address.title = user.address || "No address on file";
+        addressCell.appendChild(address);
+        row.appendChild(addressCell);
+
+        const roleCell = document.createElement("td");
+        roleCell.appendChild(span(`badge-pill ${roleBadgeClass}`, roleLabel));
+        row.appendChild(roleCell);
+
+        const functionCell = document.createElement("td");
+        functionCell.appendChild(span("text-xs text-zinc-300", func));
+        row.appendChild(functionCell);
+
+        const mfaCell = document.createElement("td");
+        mfaCell.appendChild(span(`badge-pill ${mfaBadgeClass}`, mfaLabel));
+        row.appendChild(mfaCell);
+
+        const loginCell = document.createElement("td");
+        loginCell.appendChild(span("font-mono text-xs text-zinc-200", String(user.loginCount || 0)));
+        row.appendChild(loginCell);
+
+        const statusCell = document.createElement("td");
+        statusCell.appendChild(span(`badge-pill ${statusBadgeClass}`, statusLabel));
+        row.appendChild(statusCell);
+
+        const actionCell = document.createElement("td");
+        const actions = div("flex items-center justify-end gap-1.5 whitespace-nowrap");
+        actions.append(
+            userActionButton("edit-user", `Edit ${accountLabel}`, "pencil"),
+            userActionButton("reset-mfa", `Reset 2FA for ${accountLabel}`, "shield-alert", "h-4 w-4 text-sky-400"),
+            isSuspended
+                ? userActionButton("enable-user", `Activate ${accountLabel}`, "user-check", "h-4 w-4 text-emerald-400")
+                : userActionButton("suspend-user", `Suspend ${accountLabel}`, "user-x", "h-4 w-4 text-amber-400", isSelf),
+            userActionButton("delete-user", `Delete ${accountLabel}`, "trash-2", "h-4 w-4 text-red-400", isSelf)
+        );
+        actionCell.appendChild(actions);
+        row.appendChild(actionCell);
+
+        return row;
+    }));
 
     if (window.lucide) {
         window.lucide.createIcons();
@@ -549,7 +616,7 @@ async function init() {
             adminPanel.classList.remove("hidden");
             deniedPanel.classList.add("hidden");
 
-            authActionButton.innerHTML = `<i data-lucide="log-out" class="h-4 w-4"></i><span>${escapeHtml(user.displayName || user.email || "Sign out")}</span>`;
+            setIconText(authActionButton, "log-out", user.displayName || user.email || "Sign out");
             if (window.lucide) window.lucide.createIcons();
 
             loadUsersFast();
@@ -562,15 +629,17 @@ async function init() {
 
             if (reason === "mfa-required") {
                 setConnection("error", "2FA required");
-                deniedText.innerHTML = 'Two-factor authentication (2FA) is required to manage accounts. Please complete <a class="text-sky-400 underline" href="/mfa">2FA Setup</a>.';
+                const link = document.createElement("a");
+                link.className = "text-sky-400 underline";
+                link.href = "/mfa";
+                link.textContent = "2FA Setup";
+                deniedText.replaceChildren("Two-factor authentication (2FA) is required to manage accounts. Please complete ", link, ".");
             } else {
                 setConnection("error", "Access denied");
                 deniedText.textContent = "Administrator privileges are required to access Account Administration.";
             }
 
-            authActionButton.innerHTML = user
-                ? `<i data-lucide="log-out" class="h-4 w-4"></i><span>Sign out</span>`
-                : `<i data-lucide="log-in" class="h-4 w-4"></i><span>Sign in</span>`;
+            setIconText(authActionButton, user ? "log-out" : "log-in", user ? "Sign out" : "Sign in");
             if (window.lucide) window.lucide.createIcons();
         },
         onSignedOut: () => {
@@ -582,7 +651,7 @@ async function init() {
             deniedText.textContent = "Sign in with an Administrator account is required.";
             setConnection("", "Sign in required");
 
-            authActionButton.innerHTML = `<i data-lucide="log-in" class="h-4 w-4"></i><span>Sign in</span>`;
+            setIconText(authActionButton, "log-in", "Sign in");
             if (window.lucide) window.lucide.createIcons();
 
             showAuthModal("signIn");

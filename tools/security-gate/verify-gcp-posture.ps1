@@ -11,7 +11,8 @@ function Invoke-GcloudJson {
     $json = & gcloud @Arguments --project=$ProjectId --format=json 2>$null
     if ($LASTEXITCODE -ne 0) { throw "gcloud command failed: $($Arguments -join ' ')" }
     if (-not $json) { return @() }
-    return ($json -join "`n") | ConvertFrom-Json
+    $parsed = ($json -join "`n") | ConvertFrom-Json
+    Write-Output $parsed
 }
 
 $requiredApis = @(
@@ -72,8 +73,10 @@ $expectedFunctions = @{
     listUsers = "cwb-user-admin@$ProjectId.iam.gserviceaccount.com"
     claimDefaultRole = "cwb-user-admin@$ProjectId.iam.gserviceaccount.com"
     checkInBoat = "cwb-user-admin@$ProjectId.iam.gserviceaccount.com"
+    reportSessionExit = "cwb-user-admin@$ProjectId.iam.gserviceaccount.com"
     pushBoatConfig = "cwb-boat-config@$ProjectId.iam.gserviceaccount.com"
     purgeExpiredTrails = "cwb-telemetry-ingest@$ProjectId.iam.gserviceaccount.com"
+    reconcileIdentityState = "cwb-user-admin@$ProjectId.iam.gserviceaccount.com"
 }
 $deployedFunctions = @(Invoke-GcloudJson @("functions", "list", "--v2", "--regions=us-west1"))
 foreach ($function in $deployedFunctions) {
@@ -149,7 +152,7 @@ foreach ($type in @("DATA_READ", "DATA_WRITE")) {
 }
 
 $metricNames = @(Invoke-GcloudJson @("logging", "metrics", "list")) | ForEach-Object { $_.name }
-foreach ($metric in @("cwb_webhook_rejections", "cwb_callable_auth_denials", "cwb_unknown_devices", "cwb_retention_failures")) {
+foreach ($metric in @("cwb_webhook_rejections", "cwb_callable_auth_denials", "cwb_unknown_devices", "cwb_retention_failures", "cwb_identity_state_mismatches", "cwb_forced_session_exits")) {
     if ($metric -notin $metricNames) { $failures.Add("Security log metric is missing: $metric") }
 }
 

@@ -4,7 +4,7 @@
   "description": "GCP HTTP Cloud Function mapping LoRaWAN payloads to Firestore",
   "main": "index.js",
   "scripts": {
-    "test": "node --test test/authGuards.test.js test/boatConfig.test.js test/webhookAuth.test.js test/retention.test.js test/securityLog.test.js",
+    "test": "node --test test/authGuards.test.js test/boatConfig.test.js test/identityReconciliation.test.js test/webhookAuth.test.js test/retention.test.js test/securityLog.test.js",
     "test:rules": "node --test test/firestore.rules.test.js"
   },
   "engines": {

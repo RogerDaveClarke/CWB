@@ -39,6 +39,8 @@ jobs:
         run: node tools/security-gate/security-gate.mjs
       - name: Run penetration-test regression gate
         run: node tools/pentest-gate/pentest-gate.mjs
+      - name: Run accessibility regression gate
+        run: node tools/accessibility-gate/accessibility-gate.mjs
       - name: Test authentication controls
         working-directory: platforms/gcp/cloud-ingest
         run: npm test

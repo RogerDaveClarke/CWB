@@ -26,6 +26,7 @@ const CALLABLE_OPTIONS = {
   enforceAppCheck: true,
   serviceAccount: 'cwb-user-admin@cwb-boat-operations-c50dd.iam.gserviceaccount.com'
 };
+const SESSION_EXIT_REASONS = new Set(['session-revoked', 'session-unverifiable', 'role-required', 'function-required', 'admin-required']);
 
 function assertRoleCombo(role, functionLevel) {
   if (!ROLES.includes(role)) {
@@ -99,6 +100,19 @@ exports.claimDefaultRole = onCall(CALLABLE_OPTIONS, async (request) => {
   });
   await applyClaims(request.auth.uid, AUTO_PROVISION_ROLE, AUTO_PROVISION_FUNCTION_LEVEL, false);
   return { granted: true, role: AUTO_PROVISION_ROLE, functionLevel: AUTO_PROVISION_FUNCTION_LEVEL };
+});
+
+exports.reportSessionExit = onCall(CALLABLE_OPTIONS, async (request) => {
+  requireAuthenticatedUser(request);
+  const reason = String(request.data?.reason || 'session-revoked');
+  if (!SESSION_EXIT_REASONS.has(reason)) {
+    throw new HttpsError('invalid-argument', 'Unknown session exit reason.');
+  }
+  logSecurityEvent('browser_session_forced_exit', {
+    actor: pseudonymousId(request.auth.uid),
+    reason
+  }, 'WARNING');
+  return { recorded: true };
 });
 
 // Invite (or create) a user by email and assign role + function level.

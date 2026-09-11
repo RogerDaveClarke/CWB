@@ -11,6 +11,8 @@ Project: `cwb-boat-operations-c50dd`; primary region: `us-west1`.
 - Data Read and Data Write audit logs are enabled for all services.
 - `security-alert-policy.json` monitors rejected calls, unknown devices, control changes, and purge failures.
 - GPS history has a 48-hour scheduled deletion backstop.
+- An hourly identity reconciliation compares Firebase Auth disabled/claim state with live Firestore profiles and alerts on drift.
+- Forced browser session exits emit pseudonymous security events before local sign-out and reload.
 
 ## Release Order
 
