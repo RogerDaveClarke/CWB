@@ -1,5 +1,6 @@
 import { firebaseConfig } from "./firebase-config.js";
 import { getFirebase, initAuthGuard, signOut, showAuthModal, isConfigValid } from "./auth-guard.js";
+import { initHeaderControls, setHeaderUser } from "./header-nav.js";
 import { collection, deleteField, doc, limit, onSnapshot, orderBy, query, serverTimestamp, updateDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 const DOCK = { latitude: 47.62795, longitude: -122.33645 };
@@ -114,6 +115,13 @@ function dueDisplay(boat) { if (boat.actualReturn || ["available", "maintenance"
 function alertsFor(boat) { const alerts = []; const due = fixedDue(boat); if (due && !boat.actualReturn && due < new Date()) alerts.push({ critical: true, message: `${boat.name} is ${Math.max(1, Math.round((Date.now() - due) / 60000))} minutes overdue.` }); if (boat.lowBattery || (boat.batteryMv && boat.batteryMv <= 4200)) alerts.push({ critical: true, message: `${boat.name} battery is low at ${(boat.batteryMv / 1000).toFixed(2)} V.` }); if (isOutsideZone(boat)) alerts.push({ critical: true, message: `${boat.name} is outside the Lake Union operating zone.` }); if (!boat.gpsFix) alerts.push({ critical: false, message: `${boat.name} does not have a valid GPS fix.` }); if (boat.timestamp && Date.now() - boat.timestamp.getTime() > STALE_AFTER_MINUTES * 60000) alerts.push({ critical: false, message: `${boat.name} telemetry is stale (${formatTime(boat.timestamp)}).` }); return alerts; }
 
 function formatVariance(boat) { return boat.mooringValid && boat.variance != null ? `σ² ${boat.variance.toFixed(5)}` : "Not evaluated"; }
+function markerPopup(boat) {
+    const content = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = boat.name;
+    content.append(name, document.createElement("br"), boat.mooring, document.createElement("br"), `${(boat.batteryMv / 1000).toFixed(2)} V · ${formatVariance(boat)}`);
+    return content;
+}
 function markerIcon(boat) { const status = operationalState(boat); const critical = alertsFor(boat).some(alert => alert.critical); const markerStatus = critical ? "warning" : status; const bearing = movementBearing(boat); const directionArrow = bearing == null ? "" : `<span class="boat-direction" style="--boat-bearing:${bearing.toFixed(1)}deg" title="Direction of travel"><i data-lucide="navigation-2"></i></span>`; return L.divIcon({ className: "", html: `<div class="boat-marker ${markerStatus}">${directionArrow}<i data-lucide="ship-wheel"></i><span class="boat-label">${escapeHtml(boat.name)}</span></div>`, iconSize: [38, 38], iconAnchor: [19, 19] }); }
 function updateMarkers() {
     const currentIds = new Set(state.boats.keys());
@@ -122,7 +130,7 @@ function updateMarkers() {
         if (!boat.gpsFix || !Number.isFinite(boat.latitude) || !Number.isFinite(boat.longitude)) return;
         const location = [boat.latitude, boat.longitude]; let marker = state.markers.get(boat.id);
         if (!marker) { marker = L.marker(location, { icon: markerIcon(boat), riseOnHover: true }).addTo(map); marker.on("click", () => selectBoat(boat.id, false)); state.markers.set(boat.id, marker); } else marker.setLatLng(location).setIcon(markerIcon(boat));
-        marker.bindPopup(`<strong>${escapeHtml(boat.name)}</strong><br>${escapeHtml(boat.mooring)}<br>${(boat.batteryMv / 1000).toFixed(2)} V · ${formatVariance(boat)}`);
+        marker.bindPopup(markerPopup(boat));
     });
     lucide.createIcons();
 }
@@ -443,10 +451,7 @@ async function startFirebase() {
                 state.isVolunteer = claims.role === "volunteer";
 
                 elements.signIn.classList.remove("hidden");
-                elements.signIn.innerHTML = `<i data-lucide="log-out" class="h-4 w-4"></i>`;
-                elements.signIn.title = `Sign out ${user.displayName || user.email || ""}`.trim();
-                elements.signIn.setAttribute("aria-label", elements.signIn.title);
-                lucide.createIcons();
+                setHeaderUser(elements.signIn, user);
 
                 onSnapshot(collection(db, "boats"), snapshot => {
                     state.demoMode = false;
@@ -481,9 +486,7 @@ async function startFirebase() {
             onSignedOut: () => {
                 state.user = null;
                 state.boats.clear();
-                elements.signIn.innerHTML = `<i data-lucide="log-in" class="h-4 w-4"></i>`;
-                elements.signIn.title = "Sign in";
-                lucide.createIcons();
+                setHeaderUser(elements.signIn, null);
                 setConnection("", "Sign in required");
                 elements.tableBody.innerHTML = `<tr><td colspan="13" class="empty-cell">Sign in required to view operations.</td></tr>`;
             }
@@ -530,7 +533,6 @@ function setupInteractions() {
     elements.search.addEventListener("input", event => { state.search = event.target.value.trim().toLowerCase(); renderTable(); });
     elements.statusFilter.addEventListener("change", event => { state.status = event.target.value; renderTable(); });
     document.getElementById("collapseAlerts").addEventListener("click", () => document.querySelector(".alerts-panel").classList.toggle("collapsed"));
-    document.getElementById("fullscreenToggle").addEventListener("click", () => { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); });
     let dragging = false;
     elements.splitter.addEventListener("pointerdown", event => { dragging = true; elements.splitter.classList.add("dragging"); elements.splitter.setPointerCapture(event.pointerId); });
     elements.splitter.addEventListener("pointermove", event => { if (!dragging) return; const workspace = document.getElementById("workspace").getBoundingClientRect(); if (window.innerWidth <= 900) { const height = Math.max(190, Math.min(workspace.height - 150, event.clientY - workspace.top)); elements.operationsPane.style.height = `${height}px`; } else { const width = Math.max(390, Math.min(workspace.width - 390, event.clientX - workspace.left)); document.documentElement.style.setProperty("--operations-size", `${width}px`); localStorage.setItem("cwbOperationsWidth", String(width)); } map.invalidateSize({ animate: false }); });
@@ -539,7 +541,7 @@ function setupInteractions() {
     const savedWidth = Number(localStorage.getItem("cwbOperationsWidth")); if (savedWidth && window.innerWidth > 900) document.documentElement.style.setProperty("--operations-size", `${savedWidth}px`); window.addEventListener("resize", () => map.invalidateSize());
 }
 
-setInterval(() => { document.getElementById("headerClock").textContent = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" }).format(new Date()); }, 1000);
 lucide.createIcons();
+initHeaderControls();
 setupInteractions();
 startFirebase();

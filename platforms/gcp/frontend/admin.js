@@ -1,5 +1,6 @@
 import { firebaseConfig } from "./firebase-config.js";
 import { initAuthGuard, signOut, showAuthModal, isConfigValid, getFirebase } from "./auth-guard.js";
+import { initHeaderControls, setHeaderUser } from "./header-nav.js";
 import { collection, deleteDoc, doc, getDocs, onSnapshot, serverTimestamp, setDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 const DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
@@ -580,13 +581,12 @@ function updateAuth(user, isAdmin) {
     state.user = user;
     state.isAdmin = isAdmin;
     if (user) {
-        elements.signIn.innerHTML = `<i data-lucide="log-out" class="h-4 w-4"></i><span>${escapeHtml(user.displayName || user.email || "Sign out")}</span>`;
+        setHeaderUser(elements.signIn, user);
         setConnection(isAdmin ? "live" : "error", isAdmin ? "Admin access" : "Read only");
     } else {
-        elements.signIn.innerHTML = `<i data-lucide="log-in" class="h-4 w-4"></i><span>Sign in</span>`;
+        setHeaderUser(elements.signIn, null);
         setConnection("", "Read only");
     }
-    lucide.createIcons();
 }
 
 async function startFirebase() {
@@ -694,4 +694,5 @@ buildScheduleEditor();
 state.boatTypes = defaultBoatTypes();
 renderBoatTypeOptions();
 lucide.createIcons();
+initHeaderControls();
 startFirebase();

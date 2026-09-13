@@ -70,27 +70,28 @@ export async function getFirebase() {
     };
 }
 
-export function tokenHasMfa(tokenResult, user) {
+export function tokenHasMfa(tokenResult) {
     const claims = tokenResult?.claims || {};
-    const hasClaim = claims.firebase?.sign_in_second_factor === "totp"
+    return claims.firebase?.sign_in_second_factor === "totp"
         || claims.firebase?.second_factor_identifier != null;
-    const hasEnrolled = (user?.multiFactor?.enrolledFactors || []).length > 0;
-    return hasClaim || hasEnrolled;
 }
 
 export function claimsFromToken(tokenResult) {
     const claims = tokenResult?.claims || {};
     return {
-        isAdmin: claims.admin === true || claims.role === "admin",
+        isAdmin: claims.admin === true && claims.role === "admin",
         role: typeof claims.role === "string" ? claims.role : null,
-        functionLevel: typeof claims.functionLevel === "string" ? claims.functionLevel : null
+        functionLevel: typeof claims.functionLevel === "string" ? claims.functionLevel : null,
+        email: typeof claims.email === "string" ? claims.email.trim().toLowerCase() : "",
+        emailVerified: claims.email_verified === true
     };
 }
 
 function claimsFromProfile(profile) {
     const role = typeof profile?.role === "string" ? profile.role : null;
     const functionLevel = typeof profile?.functionLevel === "string" ? profile.functionLevel : null;
-    return { isAdmin: role === "admin", role, functionLevel, status: profile?.status || null };
+    const email = typeof profile?.email === "string" ? profile.email.trim().toLowerCase() : "";
+    return { isAdmin: role === "admin", role, functionLevel, email, status: profile?.status || null };
 }
 
 export async function getEffectiveUserClaims(user, db, firestoreModule, forceRefresh = false) {
@@ -117,7 +118,7 @@ export function satisfies(claims, tokenResult, spec = {}, user = null) {
     if (spec.requireAdmin && !claims.isAdmin) return { ok: false, reason: "admin-required" };
     if (spec.roles && !spec.roles.includes(claims.role) && !claims.isAdmin) return { ok: false, reason: "role-required" };
     if (spec.functionLevels && !spec.functionLevels.includes(claims.functionLevel) && !claims.isAdmin) return { ok: false, reason: "function-required" };
-    if (spec.requireMfa && !tokenHasMfa(tokenResult, user)) return { ok: false, reason: "mfa-required" };
+    if (spec.requireMfa && !tokenHasMfa(tokenResult)) return { ok: false, reason: "mfa-required" };
     return { ok: true };
 }
 
@@ -125,8 +126,12 @@ function evaluateAccess(claims, tokenResult, spec, user) {
     if (!claims.role) return { ok: false, reason: "pending-role" };
     if (claims.status !== "active") return { ok: false, reason: "session-revoked" };
     const tokenClaims = claimsFromToken(tokenResult);
+    const userEmail = String(user?.email || "").trim().toLowerCase();
     if (claims.role !== tokenClaims.role
-        || (!claims.isAdmin && claims.functionLevel !== tokenClaims.functionLevel)) {
+        || claims.isAdmin !== tokenClaims.isAdmin
+        || claims.functionLevel !== tokenClaims.functionLevel
+        || !tokenClaims.emailVerified || !claims.email
+        || claims.email !== tokenClaims.email || claims.email !== userEmail) {
         return { ok: false, reason: "session-revoked" };
     }
     return satisfies(claims, tokenResult, spec, user);
@@ -348,17 +353,6 @@ function injectModalStyles() {
         .cwb-auth-step.cwb-hidden {
             display: none !important;
         }
-        .cwb-auth-links {
-            display: flex !important;
-            justify-content: center !important;
-            gap: 0.75rem !important;
-            font-size: 0.8rem !important;
-            margin: 0.75rem 0 !important;
-        }
-        .cwb-auth-links a {
-            color: #2563eb !important;
-            text-decoration: underline !important;
-        }
     `;
     document.head.appendChild(style);
 }
@@ -395,7 +389,7 @@ function ensureAuthModal() {
                 <!-- Step: Pending Role Assignment -->
                 <div id="authStepPendingRole" class="cwb-auth-step cwb-hidden">
                     <div class="cwb-auth-info amber">
-                        Signed in as <strong id="authPendingEmail"></strong>.<br>Your account is pending role assignment by a CWB Administrator before you can access operations. Staff signing in with a verified @cwb.org account are granted access automatically.
+                        Signed in as <strong id="authPendingEmail"></strong>.<br>Your account requires an invitation from a CWB Administrator before you can access operations.
                     </div>
                     <button id="authSignOutBtn1" class="cwb-auth-btn-secondary" type="button">Sign Out</button>
                 </div>
@@ -404,11 +398,6 @@ function ensureAuthModal() {
                 <div id="authStepDenied" class="cwb-auth-step cwb-hidden">
                     <div class="cwb-auth-info red" id="authDeniedMsg">
                         Your account does not have permission to access this page.
-                    </div>
-                    <div class="cwb-auth-links">
-                        <a href="/">Operations</a>
-                        <a href="/admin">Fleet Admin</a>
-                        <a href="/history">History</a>
                     </div>
                     <button id="authSignOutBtn2" class="cwb-auth-btn-secondary" type="button">Sign Out</button>
                 </div>
@@ -518,24 +507,6 @@ function showStep(stepName, details = {}) {
     }
 }
 
-// Users on the CWB staff domain are auto-provisioned a default role on first
-// sign-in via the claimDefaultRole callable. One attempt per user per page
-// load — a rejection means the account genuinely needs a manual invitation.
-const autoProvisionAttempted = new Set();
-
-async function tryAutoProvisionDefaultRole(user) {
-    if (autoProvisionAttempted.has(user.uid)) return false;
-    autoProvisionAttempted.add(user.uid);
-    try {
-        const { functions, functionsModule } = await getFirebase();
-        const result = await functionsModule.httpsCallable(functions, "claimDefaultRole")({});
-        return result.data?.granted === true || Boolean(result.data?.role);
-    } catch (error) {
-        console.info("Automatic role provisioning declined:", error.message);
-        return false;
-    }
-}
-
 // Main Guard initializer:
 // Auto-prompts sign-in / 2FA modal if user is not signed in or fails requirements.
 export async function initAuthGuard(spec, { onReady, onDenied, onSignedOut }) {
@@ -570,7 +541,10 @@ export async function initAuthGuard(spec, { onReady, onDenied, onSignedOut }) {
                     reportExit.catch(() => null),
                     new Promise(resolve => setTimeout(resolve, 500))
                 ]);
-                await authModule.signOut(auth);
+                await Promise.race([
+                    authModule.signOut(auth).catch(() => null),
+                    new Promise(resolve => setTimeout(resolve, 1500))
+                ]);
             } finally {
                 window.location.replace("/");
             }
@@ -581,10 +555,18 @@ export async function initAuthGuard(spec, { onReady, onDenied, onSignedOut }) {
             let initialSnapshot = true;
             const profileRef = firestoreModule.doc(db, "users", user.uid);
             profileUnsubscribe = firestoreModule.onSnapshot(profileRef, snapshot => {
-                const claims = snapshot.exists()
-                    ? claimsFromProfile(snapshot.data())
+                const profile = snapshot.exists() ? snapshot.data() : null;
+                const claims = profile
+                    ? claimsFromProfile(profile)
                     : { isAdmin: false, role: null, functionLevel: null, status: null };
-                const check = claims.status === "active"
+                const profileEmail = String(profile?.email || "").trim().toLowerCase();
+                const signedInEmail = String(user.email || "").trim().toLowerCase();
+                const tokenClaims = claimsFromToken(tokenResult);
+                const claimsMatch = claims.role === tokenClaims.role
+                    && claims.isAdmin === tokenClaims.isAdmin
+                    && claims.functionLevel === tokenClaims.functionLevel
+                    && tokenClaims.emailVerified && profileEmail === tokenClaims.email;
+                const check = claims.status === "active" && profileEmail && profileEmail === signedInEmail && claimsMatch
                     ? satisfies(claims, tokenResult, spec, user)
                     : { ok: false, reason: "session-revoked" };
                 if (!check.ok) {
@@ -604,7 +586,7 @@ export async function initAuthGuard(spec, { onReady, onDenied, onSignedOut }) {
             window.addEventListener("offline", offlineHandler);
         });
 
-        return authModule.onAuthStateChanged(auth, async (user) => {
+        const handleAuthStateChange = async (user) => {
             if (!user) {
                 stopProfileWatch();
                 showAuthModal("signIn");
@@ -624,15 +606,6 @@ export async function initAuthGuard(spec, { onReady, onDenied, onSignedOut }) {
             }
 
             if (check.reason === "pending-role") {
-                // No role anywhere — offer the domain auto-grant before parking
-                // the user on the pending screen.
-                if (await tryAutoProvisionDefaultRole(user)) {
-                    ({ tokenResult, claims } = await getEffectiveUserClaims(user, db, firestoreModule, true));
-                    check = evaluateAccess(claims, tokenResult, spec, user);
-                }
-            }
-
-            if (check.reason === "pending-role") {
                 showAuthModal("pendingRole", { email: user.email });
                 onDenied?.("pending-role", user, claims);
                 return;
@@ -640,6 +613,11 @@ export async function initAuthGuard(spec, { onReady, onDenied, onSignedOut }) {
 
             if (check.reason === "session-revoked") {
                 await forceSessionExit("session-revoked", claims);
+                return;
+            }
+
+            if (check.reason === "mfa-required") {
+                window.location.replace("/mfa");
                 return;
             }
 
@@ -657,11 +635,8 @@ export async function initAuthGuard(spec, { onReady, onDenied, onSignedOut }) {
                     // Increment login count once per browser session or if 30+ mins since last recorded in session
                     if (!lastSessionTime || (now - Number(lastSessionTime) > 30 * 60 * 1000)) {
                         sessionStorage.setItem(sessionKey, String(now));
-                        const userDocRef = firestoreModule.doc(db, "users", user.uid);
-                        firestoreModule.setDoc(userDocRef, {
-                            lastLogin: new Date().toISOString(),
-                            loginCount: firestoreModule.increment(1)
-                        }, { merge: true }).catch((err) => console.warn("Could not record login metadata", err));
+                        functionsModule.httpsCallable(functions, "recordUserLogin")({})
+                            .catch((err) => console.warn("Could not record login metadata", err));
                     }
                 } catch (err) {
                     console.warn("Could not record login metadata", err);
@@ -679,6 +654,13 @@ export async function initAuthGuard(spec, { onReady, onDenied, onSignedOut }) {
                 showAuthModal("denied", { message: msg });
                 onDenied?.(check.reason, user, claims);
             }
+        };
+
+        return authModule.onAuthStateChanged(auth, user => {
+            void handleAuthStateChange(user).catch(error => {
+                console.error("Authentication state verification failed", error);
+                void forceSessionExit("session-unverifiable");
+            });
         });
     } catch (error) {
         console.error("Auth guard initialization failed:", error);
@@ -715,9 +697,10 @@ export async function beginTotpEnrollment(user, displayName = "CWB Tracker") {
     const mfaUser = authModule.multiFactor(user);
     const session = await mfaUser.getSession();
     const secret = await authModule.TotpMultiFactorGenerator.generateSecret(session);
-    const account = user.email || user.uid;
+    const setupId = crypto.randomUUID().slice(0, 6).toUpperCase();
+    const account = `${user.email || user.uid} [setup ${setupId}]`;
     const qrUrl = secret.generateQrCodeUrl(account, displayName);
-    return { session, secret, qrUrl };
+    return { session, secret, qrUrl, setupId };
 }
 
 export async function completeTotpEnrollment(user, secret, code, label = "Authenticator") {

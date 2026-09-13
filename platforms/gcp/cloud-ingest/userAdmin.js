@@ -3,8 +3,11 @@
 // claim AND a TOTP-verified session (second factor present in the ID token).
 const { initializeApp, getApps } = require('firebase-admin/app');
 const { getAuth } = require('firebase-admin/auth');
-const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+const { getFirestore, FieldValue, Timestamp } = require('firebase-admin/firestore');
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { onSchedule } = require('firebase-functions/v2/scheduler');
+const { defineSecret } = require('firebase-functions/params');
+const { createCipheriv, createDecipheriv, createHash, randomBytes } = require('node:crypto');
 const { requireAuthenticatedUser, requireMfaAdmin, requireMfaOperations } = require('./authGuards');
 const { logSecurityEvent, pseudonymousId } = require('./securityLog');
 
@@ -16,17 +19,19 @@ const db = getFirestore();
 const ROLES = ['admin', 'manager', 'staff', 'volunteer'];
 const FUNCTION_LEVELS = ['operations', 'administration'];
 
-// Verified sign-ins from this domain are automatically provisioned with the
-// default role below instead of waiting for a manual invitation. Admins can
-// elevate (or suspend) the account afterwards from Account Administration.
-const AUTO_PROVISION_DOMAIN = 'cwb.org';
-const AUTO_PROVISION_ROLE = 'staff';
-const AUTO_PROVISION_FUNCTION_LEVEL = 'operations';
+const RESEND_API_KEY = defineSecret('RESEND_API_KEY');
+const RESEND_FROM_EMAIL = defineSecret('RESEND_FROM_EMAIL');
+const LIFECYCLE_NOTIFICATION_KEY = defineSecret('LIFECYCLE_NOTIFICATION_KEY');
 const CALLABLE_OPTIONS = {
   enforceAppCheck: true,
   serviceAccount: 'cwb-user-admin@cwb-boat-operations-c50dd.iam.gserviceaccount.com'
 };
+const LIFECYCLE_CALLABLE_OPTIONS = {
+  ...CALLABLE_OPTIONS,
+  secrets: [RESEND_API_KEY, RESEND_FROM_EMAIL, LIFECYCLE_NOTIFICATION_KEY]
+};
 const SESSION_EXIT_REASONS = new Set(['session-revoked', 'session-unverifiable', 'role-required', 'function-required', 'admin-required']);
+const INVITATION_TTL_MS = 24 * 60 * 60 * 1000;
 
 function assertRoleCombo(role, functionLevel) {
   if (!ROLES.includes(role)) {
@@ -39,6 +44,241 @@ function assertRoleCombo(role, functionLevel) {
   if (role === 'volunteer' && functionLevel === 'administration') {
     throw new HttpsError('invalid-argument', 'Volunteers cannot be assigned the Administration function.');
   }
+}
+
+function normalizeEmail(value) {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+function validateLifecycleRequest(data, userRecord, requireReason = false) {
+  const confirmationEmail = typeof data?.confirmationEmail === 'string' ? data.confirmationEmail.trim() : '';
+  const displayedEmail = typeof userRecord?.email === 'string' ? userRecord.email.trim() : '';
+  const accountEmail = normalizeEmail(userRecord?.email);
+  if (!confirmationEmail || !accountEmail || confirmationEmail !== displayedEmail) {
+    throw new HttpsError('failed-precondition', 'Type the account email address exactly to confirm this action.');
+  }
+  const reason = typeof data?.reason === 'string' ? data.reason.trim() : '';
+  if (requireReason && (reason.length < 10 || reason.length > 1000)) {
+    throw new HttpsError('invalid-argument', 'A suspension explanation between 10 and 1000 characters is required.');
+  }
+  return { email: accountEmail, reason };
+}
+
+function lifecycleEncryptionKey() {
+  const key = Buffer.from(LIFECYCLE_NOTIFICATION_KEY.value(), 'base64');
+  if (key.length !== 32) throw new Error('LIFECYCLE_NOTIFICATION_KEY must be a base64-encoded 32-byte key.');
+  return key;
+}
+
+function encryptLifecycleMessage(message) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', lifecycleEncryptionKey(), iv);
+  const ciphertext = Buffer.concat([cipher.update(JSON.stringify(message), 'utf8'), cipher.final()]);
+  return { ciphertext: ciphertext.toString('base64'), iv: iv.toString('base64'), tag: cipher.getAuthTag().toString('base64') };
+}
+
+function decryptLifecycleMessage(encrypted) {
+  const decipher = createDecipheriv('aes-256-gcm', lifecycleEncryptionKey(), Buffer.from(encrypted.iv, 'base64'));
+  decipher.setAuthTag(Buffer.from(encrypted.tag, 'base64'));
+  return JSON.parse(Buffer.concat([
+    decipher.update(Buffer.from(encrypted.ciphertext, 'base64')),
+    decipher.final()
+  ]).toString('utf8'));
+}
+
+function lifecycleJobExpired(job, now = Date.now()) {
+  return (job.expiresAt?.toMillis?.() || 0) <= now;
+}
+
+async function sendLifecycleEmail({ to, subject, text }, fetchImpl = fetch, idempotencyKey = '') {
+  const apiKey = RESEND_API_KEY.value();
+  const from = RESEND_FROM_EMAIL.value();
+  if (!apiKey || !from) throw new Error('Account notification email is not configured.');
+  let lastError;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const response = await fetchImpl('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
+        },
+        body: JSON.stringify({ from, to: [to], subject, text })
+      });
+      if (response.ok) return true;
+      lastError = new Error(`Email provider returned status ${response.status}.`);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error('Email delivery failed.');
+}
+
+async function queueLifecycleJob(payload) {
+  const reference = db.collection('lifecycle_notification_outbox').doc();
+  await reference.create({
+    ...encryptLifecycleMessage(payload),
+    attempts: 0,
+    operationCompleted: false,
+    createdAt: FieldValue.serverTimestamp(),
+    expiresAt: Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000),
+    nextAttemptAt: Timestamp.fromMillis(Date.now() + 5 * 60 * 1000)
+  });
+  return reference;
+}
+
+async function performLifecycleOperation(payload) {
+  const auth = getAuth();
+  let userExists = true;
+  try {
+    await auth.getUser(payload.uid);
+  } catch (error) {
+    if (error.code !== 'auth/user-not-found') throw error;
+    userExists = false;
+  }
+
+  if (payload.action === 'suspend') {
+    if (!userExists) throw new Error('The account no longer exists.');
+    await db.collection('users').doc(payload.uid).set({
+      status: 'suspended', role: null, functionLevel: null, updatedAt: FieldValue.serverTimestamp()
+    }, { merge: true });
+    await auth.updateUser(payload.uid, { disabled: true, displayName: null, photoURL: null });
+    await auth.setCustomUserClaims(payload.uid, {});
+    await auth.revokeRefreshTokens(payload.uid);
+    await db.recursiveDelete(db.collection('users').doc(payload.uid));
+    await db.collection('users').doc(payload.uid).create({
+      status: 'suspended',
+      suspendedAt: FieldValue.serverTimestamp()
+    });
+    await deleteLinkedInvitations(payload.uid, payload.email);
+  } else if (payload.action === 'delete') {
+    await db.collection('users').doc(payload.uid).set({
+      status: 'deleting', role: null, functionLevel: null, updatedAt: FieldValue.serverTimestamp()
+    }, { merge: true });
+    if (userExists) {
+      await auth.updateUser(payload.uid, { disabled: true });
+      await auth.setCustomUserClaims(payload.uid, {});
+      await auth.revokeRefreshTokens(payload.uid);
+    }
+    await Promise.all([
+      db.recursiveDelete(db.collection('users').doc(payload.uid)),
+      deleteLinkedInvitations(payload.uid, payload.email)
+    ]);
+    if (userExists) await auth.deleteUser(payload.uid);
+  } else {
+    throw new Error('Unsupported lifecycle action.');
+  }
+}
+
+async function processQueuedLifecycleJob(reference) {
+  const claimed = await db.runTransaction(async transaction => {
+    const snapshot = await transaction.get(reference);
+    if (!snapshot.exists) return null;
+    const processingUntil = snapshot.get('processingUntil')?.toMillis?.() || 0;
+    if (processingUntil > Date.now()) return { busy: true };
+    transaction.update(reference, {
+      processingUntil: Timestamp.fromMillis(Date.now() + 6 * 60 * 1000)
+    });
+    return { data: snapshot.data() };
+  });
+  if (!claimed) return { operationCompleted: true, notificationSent: true };
+  if (claimed.busy) return { operationCompleted: false, notificationSent: false, busy: true };
+  const job = claimed.data;
+  let operationCompleted = job.operationCompleted === true;
+  if (lifecycleJobExpired(job)) {
+    await reference.delete();
+    return { operationCompleted, notificationSent: false, expired: true };
+  }
+  try {
+    const payload = decryptLifecycleMessage(job);
+    if (!operationCompleted) {
+      await performLifecycleOperation(payload);
+      operationCompleted = true;
+      await reference.update({ operationCompleted: true });
+      logSecurityEvent(`user_${payload.action === 'delete' ? 'deleted' : 'suspended'}`, {
+        actor: pseudonymousId(payload.actorUid),
+        target: pseudonymousId(payload.uid)
+      });
+    }
+    if (lifecycleJobExpired(job)) {
+      await reference.delete();
+      return { operationCompleted, notificationSent: false, expired: true };
+    }
+    await sendLifecycleEmail(payload.message, fetch, `cwb-lifecycle-${reference.id}`);
+    await reference.delete();
+    return { operationCompleted: true, notificationSent: true };
+  } catch {
+    const attempts = Number(job.attempts || 0) + 1;
+    if ((job.expiresAt?.toMillis?.() || 0) <= Date.now()) await reference.delete();
+    else await reference.update({
+      attempts,
+      processingUntil: FieldValue.delete(),
+      nextAttemptAt: Timestamp.fromMillis(Date.now() + 15 * 60 * 1000)
+    });
+    return { operationCompleted, notificationSent: false };
+  }
+}
+
+async function deleteLinkedInvitations(uid, email) {
+  const queries = [
+    db.collection('user_invitations').where('email', '==', email),
+    db.collection('user_invitations').where('reservedUid', '==', uid),
+    db.collection('user_invitations').where('createdBy', '==', uid)
+  ];
+  const snapshots = await Promise.all(queries.map(query => query.get()));
+  const references = new Map();
+  snapshots.forEach(snapshot => snapshot.docs.forEach(document => references.set(document.ref.path, document.ref)));
+  if (!references.size) return 0;
+  const batch = db.batch();
+  references.forEach(reference => batch.delete(reference));
+  await batch.commit();
+  return references.size;
+}
+
+function hashInvitationValue(value) {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function invitationToken() {
+  const token = randomBytes(32).toString('base64url');
+  return { token, tokenHash: hashInvitationValue(token) };
+}
+
+function assertUsableInvitation(invitation, now = Date.now()) {
+  if (!invitation || !['pending', 'reserved'].includes(invitation.status)) {
+    throw new HttpsError('failed-precondition', 'This invitation is invalid or has already been used.');
+  }
+  const expiresAt = invitation.expiresAt?.toMillis?.() ?? Number(invitation.expiresAt);
+  if (!Number.isFinite(expiresAt) || expiresAt <= now) {
+    throw new HttpsError('failed-precondition', 'This invitation is invalid or has already been used.');
+  }
+}
+
+function assertInvitationIdentity(invitation, userRecord) {
+  if (userRecord.emailVerified !== true || normalizeEmail(userRecord.email) !== invitation.email) {
+    throw new HttpsError('permission-denied', 'This invitation does not match the verified signed-in account.');
+  }
+  if (invitation.status === 'reserved' && invitation.reservedUid !== userRecord.uid) {
+    throw new HttpsError('failed-precondition', 'This invitation is invalid or has already been used.');
+  }
+}
+
+function buildIdentityUpdate(userRecord, email, displayName) {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) {
+    throw new HttpsError('invalid-argument', 'An email address is required.');
+  }
+  const emailChanged = normalizeEmail(userRecord.email) !== normalizedEmail;
+  return {
+    email: normalizedEmail,
+    emailChanged,
+    authUpdate: {
+      email: normalizedEmail,
+      displayName: displayName || undefined,
+      ...(emailChanged ? { emailVerified: false } : {})
+    }
+  };
 }
 
 async function writeUserDoc(uid, data) {
@@ -58,50 +298,6 @@ async function applyClaims(uid, role, functionLevel, revokeSessions = true) {
   if (revokeSessions) await auth.revokeRefreshTokens(uid);
 }
 
-// Self-service default role for verified accounts on the CWB staff domain.
-// Called by the auth guard when a signed-in user has no role yet. The email
-// and its verification state come from the ID token, never from client input.
-exports.claimDefaultRole = onCall(CALLABLE_OPTIONS, async (request) => {
-  requireAuthenticatedUser(request);
-  const token = request.auth.token || {};
-  if (token.role || token.admin === true) {
-    return { granted: false, role: token.role || 'admin' };
-  }
-
-  const auth = getAuth();
-  const userRecord = await auth.getUser(request.auth.uid);
-  const email = String(userRecord.email || '').toLowerCase();
-  if (userRecord.emailVerified !== true || !email.endsWith(`@${AUTO_PROVISION_DOMAIN}`)) {
-    throw new HttpsError(
-      'permission-denied',
-      `Automatic access is limited to verified @${AUTO_PROVISION_DOMAIN} accounts. Ask a CWB administrator for an invitation.`
-    );
-  }
-
-  // The token can be stale; re-check the live user record so we never
-  // downgrade a role an admin granted moments ago.
-  const existing = userRecord.customClaims || {};
-  if (existing.role || existing.admin === true) {
-    return { granted: false, role: existing.role || 'admin' };
-  }
-  const profileDoc = await db.collection('users').doc(request.auth.uid).get();
-  if (profileDoc.exists && profileDoc.data().status === 'suspended') {
-    throw new HttpsError('permission-denied', 'This account has been suspended by an administrator.');
-  }
-
-  await writeUserDoc(request.auth.uid, {
-    email,
-    displayName: userRecord.displayName || '',
-    role: AUTO_PROVISION_ROLE,
-    functionLevel: AUTO_PROVISION_FUNCTION_LEVEL,
-    status: 'active',
-    createdBy: 'domain-auto-provision',
-    createdAt: FieldValue.serverTimestamp()
-  });
-  await applyClaims(request.auth.uid, AUTO_PROVISION_ROLE, AUTO_PROVISION_FUNCTION_LEVEL, false);
-  return { granted: true, role: AUTO_PROVISION_ROLE, functionLevel: AUTO_PROVISION_FUNCTION_LEVEL };
-});
-
 exports.reportSessionExit = onCall(CALLABLE_OPTIONS, async (request) => {
   requireAuthenticatedUser(request);
   const reason = String(request.data?.reason || 'session-revoked');
@@ -115,51 +311,168 @@ exports.reportSessionExit = onCall(CALLABLE_OPTIONS, async (request) => {
   return { recorded: true };
 });
 
-// Invite (or create) a user by email and assign role + function level.
+exports.recordUserLogin = onCall(CALLABLE_OPTIONS, async (request) => {
+  requireAuthenticatedUser(request);
+  const [userRecord, profileSnapshot] = await Promise.all([
+    getAuth().getUser(request.auth.uid),
+    db.collection('users').doc(request.auth.uid).get()
+  ]);
+  if (!profileSnapshot.exists || profileSnapshot.get('status') !== 'active'
+      || normalizeEmail(profileSnapshot.get('email')) !== normalizeEmail(userRecord.email)) {
+    throw new HttpsError('permission-denied', 'An active account is required.');
+  }
+  await profileSnapshot.ref.set({ lastLogin: FieldValue.serverTimestamp(), loginCount: FieldValue.increment(1) }, { merge: true });
+  return { recorded: true };
+});
+
+exports.recordMfaEnrollment = onCall(CALLABLE_OPTIONS, async (request) => {
+  requireAuthenticatedUser(request);
+  const [userRecord, profileSnapshot] = await Promise.all([
+    getAuth().getUser(request.auth.uid),
+    db.collection('users').doc(request.auth.uid).get()
+  ]);
+  if (!(userRecord.multiFactor?.enrolledFactors || []).some(factor => factor.factorId === 'totp')) {
+    throw new HttpsError('failed-precondition', 'No enrolled authenticator was found.');
+  }
+  if (!profileSnapshot.exists || !['pending_mfa', 'active'].includes(profileSnapshot.get('status'))
+      || normalizeEmail(profileSnapshot.get('email')) !== normalizeEmail(userRecord.email)) {
+    throw new HttpsError('permission-denied', 'A verified invitation or active account is required.');
+  }
+  await profileSnapshot.ref.set({ mfaEnrolled: true, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  return { recorded: true };
+});
+
+// Create a pending invitation. No Auth user, profile, or role claim is created
+// until the recipient proves mailbox control and completes MFA enrollment.
 exports.inviteUser = onCall(CALLABLE_OPTIONS, async (request) => {
   await requireMfaAdmin(request);
   const { email, displayName = '', address = '', role = 'staff', functionLevel = 'operations' } = request.data || {};
-  if (!email || typeof email !== 'string') {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) {
     throw new HttpsError('invalid-argument', 'An email address is required.');
   }
   assertRoleCombo(role, functionLevel);
 
-  const auth = getAuth();
-  let userRecord;
   try {
-    userRecord = await auth.getUserByEmail(email);
-  } catch (error) {
-    if (error.code === 'auth/user-not-found') {
-      userRecord = await auth.createUser({
-        email,
-        displayName: displayName || undefined,
-        emailVerified: false
-      });
-    } else {
-      throw error;
+    const existingUser = await getAuth().getUserByEmail(normalizedEmail);
+    const existingProfile = await db.collection('users').doc(existingUser.uid).get();
+    if (existingProfile.exists && existingProfile.get('status') === 'active') {
+      throw new HttpsError('already-exists', 'This email already has an active CWB account. Edit that account instead.');
     }
+  } catch (error) {
+    if (error.code !== 'auth/user-not-found') throw error;
   }
-  if (displayName && userRecord.displayName !== displayName) {
-    await auth.updateUser(userRecord.uid, { displayName });
-  }
-  await writeUserDoc(userRecord.uid, {
-    email,
-    displayName: displayName || userRecord.displayName || '',
+
+  const { token, tokenHash } = invitationToken();
+  const invitationRef = db.collection('user_invitations').doc(tokenHash);
+  await invitationRef.create({
+    email: normalizedEmail,
+    displayName: displayName || '',
     address: address || '',
     role,
     functionLevel,
-    status: 'active',
+    status: 'pending',
     createdBy: request.auth.uid,
-    createdAt: FieldValue.serverTimestamp()
+    createdAt: FieldValue.serverTimestamp(),
+    expiresAt: Timestamp.fromMillis(Date.now() + INVITATION_TTL_MS)
   });
-  await applyClaims(userRecord.uid, role, functionLevel);
-  return { uid: userRecord.uid, email, displayName, address, role, functionLevel };
+  logSecurityEvent('user_invitation_created', { actor: pseudonymousId(request.auth.uid) });
+  return { invitationId: tokenHash, token, email: normalizedEmail, expiresInHours: 24 };
 });
 
-// Update an existing user's profile information (displayName, address, role, functionLevel).
+exports.cancelUserInvitation = onCall(CALLABLE_OPTIONS, async (request) => {
+  await requireMfaAdmin(request);
+  const invitationId = String(request.data?.invitationId || '');
+  if (!/^[0-9a-f]{64}$/.test(invitationId)) throw new HttpsError('invalid-argument', 'Invalid invitation.');
+  const invitationRef = db.collection('user_invitations').doc(invitationId);
+  await db.runTransaction(async transaction => {
+    const invitationSnapshot = await transaction.get(invitationRef);
+    if (!invitationSnapshot.exists) return;
+    const invitation = invitationSnapshot.data();
+    if (invitation.reservedUid) {
+      const userRef = db.collection('users').doc(invitation.reservedUid);
+      const userSnapshot = await transaction.get(userRef);
+      if (userSnapshot.exists && userSnapshot.get('status') === 'pending_mfa'
+          && userSnapshot.get('invitationId') === invitationId) transaction.delete(userRef);
+    }
+    transaction.delete(invitationRef);
+  });
+  return { cancelled: true };
+});
+
+exports.acceptUserInvitation = onCall(CALLABLE_OPTIONS, async (request) => {
+  requireAuthenticatedUser(request);
+  const token = String(request.data?.token || '');
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new HttpsError('failed-precondition', 'This invitation is invalid or has already been used.');
+  const invitationRef = db.collection('user_invitations').doc(hashInvitationValue(token));
+  const userRecord = await getAuth().getUser(request.auth.uid);
+  const userRef = db.collection('users').doc(request.auth.uid);
+
+  const invitation = await db.runTransaction(async transaction => {
+    const [snapshot, userSnapshot] = await Promise.all([
+      transaction.get(invitationRef), transaction.get(userRef)
+    ]);
+    const data = snapshot.exists ? snapshot.data() : null;
+    assertUsableInvitation(data);
+    assertInvitationIdentity(data, userRecord);
+    if (userSnapshot.exists && userSnapshot.get('status') === 'active') {
+      throw new HttpsError('already-exists', 'This account is already active.');
+    }
+    transaction.update(invitationRef, {
+      status: 'reserved', reservedUid: request.auth.uid,
+      reservedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp()
+    });
+    transaction.set(userRef, {
+      email: data.email, displayName: data.displayName || userRecord.displayName || '',
+      address: data.address || '', status: 'pending_mfa', invitationId: snapshot.id,
+      createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp()
+    }, { merge: true });
+    return data;
+  });
+  return { accepted: true, email: invitation.email };
+});
+
+exports.completeUserInvitation = onCall(CALLABLE_OPTIONS, async (request) => {
+  requireAuthenticatedUser(request);
+  const token = String(request.data?.token || '');
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new HttpsError('failed-precondition', 'This invitation is invalid or has already been used.');
+  const invitationRef = db.collection('user_invitations').doc(hashInvitationValue(token));
+  const userRecord = await getAuth().getUser(request.auth.uid);
+  if (!(userRecord.multiFactor?.enrolledFactors || []).some(factor => factor.factorId === 'totp')) {
+    throw new HttpsError('failed-precondition', 'Complete authenticator enrollment before activating this invitation.');
+  }
+  const snapshot = await invitationRef.get();
+  const invitation = snapshot.exists ? snapshot.data() : null;
+  assertUsableInvitation(invitation);
+  assertInvitationIdentity(invitation, userRecord);
+  if (invitation.status !== 'reserved' || invitation.reservedUid !== request.auth.uid) {
+    throw new HttpsError('failed-precondition', 'This invitation is invalid or has already been used.');
+  }
+
+  await applyClaims(request.auth.uid, invitation.role, invitation.functionLevel, false);
+  await db.runTransaction(async transaction => {
+    const current = await transaction.get(invitationRef);
+    const data = current.exists ? current.data() : null;
+    assertUsableInvitation(data);
+    assertInvitationIdentity(data, userRecord);
+    if (data.status !== 'reserved') throw new HttpsError('failed-precondition', 'This invitation is invalid or has already been used.');
+    transaction.set(db.collection('users').doc(request.auth.uid), {
+      email: data.email, displayName: data.displayName || userRecord.displayName || '',
+      address: data.address || '', role: data.role, functionLevel: data.functionLevel,
+      status: 'active', mfaEnrolled: true, invitationId: FieldValue.delete(),
+      updatedAt: FieldValue.serverTimestamp()
+    }, { merge: true });
+    transaction.delete(invitationRef);
+  });
+  await getAuth().revokeRefreshTokens(request.auth.uid);
+  logSecurityEvent('user_invitation_completed', { actor: pseudonymousId(request.auth.uid) });
+  return { activated: true };
+});
+
+// Update an existing user's identity, profile, and access settings.
 exports.updateUserProfile = onCall(CALLABLE_OPTIONS, async (request) => {
   await requireMfaAdmin(request);
-  const { uid, displayName = '', address = '', role, functionLevel } = request.data || {};
+  const { uid, email, displayName = '', address = '', role, functionLevel } = request.data || {};
   if (!uid || typeof uid !== 'string') {
     throw new HttpsError('invalid-argument', 'A user ID is required.');
   }
@@ -169,19 +482,26 @@ exports.updateUserProfile = onCall(CALLABLE_OPTIONS, async (request) => {
   }
 
   const auth = getAuth();
-  await auth.updateUser(uid, {
-    displayName: displayName || undefined
-  });
+  const userRecord = await auth.getUser(uid);
+  const identityUpdate = buildIdentityUpdate(userRecord, email, displayName);
+  await auth.updateUser(uid, identityUpdate.authUpdate);
 
   await writeUserDoc(uid, {
+    email: identityUpdate.email,
     displayName: displayName || '',
     address: address || '',
     role,
     functionLevel
   });
   await applyClaims(uid, role, functionLevel);
+  if (identityUpdate.emailChanged) {
+    logSecurityEvent('user_email_changed', {
+      actor: pseudonymousId(request.auth.uid),
+      target: pseudonymousId(uid)
+    });
+  }
 
-  return { uid, displayName, address, role, functionLevel };
+  return { uid, email: identityUpdate.email, displayName, address, role, functionLevel };
 });
 
 // Change role/functionLevel for an existing user.
@@ -201,7 +521,7 @@ exports.setUserRole = onCall(CALLABLE_OPTIONS, async (request) => {
 });
 
 // Disable / Suspend a user account (cannot sign in) and clear privileged claims.
-exports.disableUser = onCall(CALLABLE_OPTIONS, async (request) => {
+exports.disableUser = onCall(LIFECYCLE_CALLABLE_OPTIONS, async (request) => {
   await requireMfaAdmin(request);
   const { uid } = request.data || {};
   if (!uid) {
@@ -210,31 +530,52 @@ exports.disableUser = onCall(CALLABLE_OPTIONS, async (request) => {
   if (uid === request.auth.uid) {
     throw new HttpsError('failed-precondition', 'You cannot suspend your own account.');
   }
-  await writeUserDoc(uid, { status: 'suspended', role: null, functionLevel: null });
-  await getAuth().updateUser(uid, { disabled: true });
-  await getAuth().setCustomUserClaims(uid, {});
-  await getAuth().revokeRefreshTokens(uid);
-  logSecurityEvent('user_suspended', { actor: pseudonymousId(request.auth.uid), target: pseudonymousId(uid) });
-  return { uid, status: 'suspended' };
+  const auth = getAuth();
+  const userRecord = await auth.getUser(uid);
+  const { email, reason } = validateLifecycleRequest(request.data, userRecord, true);
+  const job = await queueLifecycleJob({
+    action: 'suspend',
+    actorUid: request.auth.uid,
+    uid,
+    email,
+    message: {
+      to: email,
+      subject: 'Your CWB account has been suspended',
+      text: `Your access to CWB Operations has been suspended by an administrator.\n\nExplanation:\n${reason}\n\nIf you believe this was an error, contact The Center for Wooden Boats.`
+    }
+  });
+  const result = await processQueuedLifecycleJob(job);
+  if (!result.notificationSent) {
+    logSecurityEvent('account_notification_failed', { target: pseudonymousId(uid), action: 'suspend' }, 'ERROR');
+  }
+  return { uid, status: result.operationCompleted ? 'suspended' : 'queued', ...result };
 });
 
 // Re-enable a previously suspended account.
 exports.enableUser = onCall(CALLABLE_OPTIONS, async (request) => {
   await requireMfaAdmin(request);
-  const { uid, role = 'volunteer', functionLevel = 'operations' } = request.data || {};
-  if (!uid) {
-    throw new HttpsError('invalid-argument', 'A uid is required.');
+  const { uid, role, functionLevel } = request.data || {};
+  if (!uid || !role || !functionLevel) {
+    throw new HttpsError('invalid-argument', 'A user ID, role, and function level are required.');
   }
   assertRoleCombo(role, functionLevel);
-  await getAuth().updateUser(uid, { disabled: false });
+  const auth = getAuth();
+  const userRecord = await auth.getUser(uid);
+  await auth.updateUser(uid, { disabled: false });
   await applyClaims(uid, role, functionLevel);
   logSecurityEvent('user_enabled', { actor: pseudonymousId(request.auth.uid), target: pseudonymousId(uid) });
-  await writeUserDoc(uid, { status: 'active', role, functionLevel });
+  await writeUserDoc(uid, {
+    email: normalizeEmail(userRecord.email),
+    status: 'active',
+    role,
+    functionLevel,
+    mfaEnrolled: (userRecord.multiFactor?.enrolledFactors || []).some(factor => factor.factorId === 'totp')
+  });
   return { uid, status: 'active' };
 });
 
 // Delete a user completely from Authentication and Firestore.
-exports.deleteUser = onCall(CALLABLE_OPTIONS, async (request) => {
+exports.deleteUser = onCall(LIFECYCLE_CALLABLE_OPTIONS, async (request) => {
   await requireMfaAdmin(request);
   const { uid } = request.data || {};
   if (!uid) {
@@ -244,16 +585,46 @@ exports.deleteUser = onCall(CALLABLE_OPTIONS, async (request) => {
     throw new HttpsError('failed-precondition', 'You cannot delete your own account.');
   }
   const auth = getAuth();
-  await db.collection('users').doc(uid).delete();
-  try {
-    await auth.deleteUser(uid);
-  } catch (error) {
-    if (error.code !== 'auth/user-not-found') {
-      throw error;
+  const userRecord = await auth.getUser(uid);
+  const { email } = validateLifecycleRequest(request.data, userRecord);
+  const job = await queueLifecycleJob({
+    action: 'delete',
+    actorUid: request.auth.uid,
+    uid,
+    email,
+    message: {
+      to: email,
+      subject: 'Your CWB account has been permanently deleted',
+      text: 'Your CWB Operations account and personal profile data have been permanently deleted from active CWB systems. Your access credentials and enrolled two-factor authentication have also been removed.'
     }
+  });
+  const result = await processQueuedLifecycleJob(job);
+  if (!result.notificationSent) {
+    logSecurityEvent('account_notification_failed', { target: pseudonymousId(uid), action: 'delete' }, 'ERROR');
   }
-  logSecurityEvent('user_deleted', { actor: pseudonymousId(request.auth.uid), target: pseudonymousId(uid) });
-  return { uid, deleted: true };
+  return { uid, deleted: result.operationCompleted, queued: !result.operationCompleted, ...result };
+});
+
+exports.retryLifecycleNotifications = onSchedule({
+  schedule: 'every 15 minutes',
+  timeZone: 'America/Los_Angeles',
+  retryCount: 3,
+  timeoutSeconds: 300,
+  maxInstances: 1,
+  serviceAccount: 'cwb-user-admin@cwb-boat-operations-c50dd.iam.gserviceaccount.com',
+  secrets: [RESEND_API_KEY, RESEND_FROM_EMAIL, LIFECYCLE_NOTIFICATION_KEY]
+}, async () => {
+  const outbox = db.collection('lifecycle_notification_outbox');
+  const expiredSnapshot = await outbox
+    .where('expiresAt', '<=', Timestamp.now())
+    .limit(500)
+    .get();
+  await Promise.all(expiredSnapshot.docs.map(document => document.ref.delete()));
+  const snapshot = await outbox
+    .where('nextAttemptAt', '<=', Timestamp.now())
+    .limit(100)
+    .get();
+  await Promise.all(snapshot.docs.map(document => processQueuedLifecycleJob(document.ref)));
 });
 
 // Unenroll all TOTP factors so the user must set up MFA again at next sign-in.
@@ -296,9 +667,10 @@ exports.listUsers = onCall(CALLABLE_OPTIONS, async (request) => {
   await requireMfaAdmin(request);
   const auth = getAuth();
 
-  const [records, profileSnapshot] = await Promise.all([
+  const [records, profileSnapshot, invitationSnapshot] = await Promise.all([
     listAllAuthRecords(auth),
-    db.collection('users').get()
+    db.collection('users').get(),
+    db.collection('user_invitations').where('status', 'in', ['pending', 'reserved']).get()
   ]);
 
   const profiles = new Map();
@@ -323,6 +695,27 @@ exports.listUsers = onCall(CALLABLE_OPTIONS, async (request) => {
     };
   });
 
+  invitationSnapshot.forEach((document) => {
+    const invitation = document.data();
+    if ((invitation.expiresAt?.toMillis?.() || 0) <= Date.now()) return;
+    users.push({
+      uid: `invitation:${document.id}`,
+      invitationId: document.id,
+      email: invitation.email || '',
+      displayName: invitation.displayName || '',
+      address: invitation.address || '',
+      disabled: false,
+      mfaEnrolled: false,
+      role: invitation.role || null,
+      functionLevel: invitation.functionLevel || null,
+      status: 'invited',
+      loginCount: 0,
+      lastLogin: null,
+      createdAt: invitation.createdAt || null,
+      expiresAt: invitation.expiresAt || null
+    });
+  });
+
   return { users };
 });
 
@@ -337,6 +730,7 @@ exports.checkInBoat = onCall(CALLABLE_OPTIONS, async (request) => {
 
   const boatRef = db.collection('boats').doc(boatId);
   const rentalHistoryRef = db.collection('rental_history').doc();
+  const eventActivityRef = db.collection('events').doc('_placeholder').collection('activity').doc();
   const rentalEnded = await db.runTransaction(async (transaction) => {
     const boatSnapshot = await transaction.get(boatRef);
     if (!boatSnapshot.exists) {
@@ -349,6 +743,7 @@ exports.checkInBoat = onCall(CALLABLE_OPTIONS, async (request) => {
 
     const checkedInAt = new Date();
     const checkedOutAt = boat.time_out?.toDate?.() || null;
+    const eventId = typeof boat.event_id === 'string' && !boat.event_id.includes('/') ? boat.event_id : '';
     transaction.create(rentalHistoryRef, {
       device_id: boatId,
       vessel_name: boat.vessel_name || '',
@@ -359,8 +754,25 @@ exports.checkInBoat = onCall(CALLABLE_OPTIONS, async (request) => {
       duration_minutes: checkedOutAt
         ? Math.max(0, Math.round((checkedInAt - checkedOutAt) / 60000))
         : 0,
-      passenger_count: Number.isInteger(boat.passenger_count) ? boat.passenger_count : 0
+      passenger_count: Number.isInteger(boat.passenger_count) ? boat.passenger_count : 0,
+      use_type: boat.use_type || 'rental',
+      event_id: eventId,
+      event_name: eventId ? (boat.event_name || '') : ''
     });
+    if (eventId) {
+      const eventRef = db.collection('events').doc(eventId);
+      transaction.set(eventRef.collection('boat_sessions').doc(boatId), {
+        status: 'returned',
+        passenger_count: Number.isInteger(boat.passenger_count) ? boat.passenger_count : 0,
+        returned_at: FieldValue.serverTimestamp(), due_at: FieldValue.delete(),
+        updated_at: FieldValue.serverTimestamp()
+      }, { merge: true });
+      transaction.create(eventRef.collection('activity').doc(eventActivityRef.id), {
+        action: 'return', boat_id: boatId, vessel_name: boat.vessel_name || boatId,
+        passenger_count: Number.isInteger(boat.passenger_count) ? boat.passenger_count : 0,
+        occurred_at: FieldValue.serverTimestamp()
+      });
+    }
     transaction.update(boatRef, {
       availability_status: 'available',
       tracking_enabled: false,
@@ -369,6 +781,12 @@ exports.checkInBoat = onCall(CALLABLE_OPTIONS, async (request) => {
       renter_type: FieldValue.delete(),
       passenger_count: FieldValue.delete(),
       time_out: FieldValue.delete(),
+      time_due_back: FieldValue.delete(),
+      rental_type: FieldValue.delete(),
+      rental_minutes: FieldValue.delete(),
+      use_type: FieldValue.delete(),
+      event_id: FieldValue.delete(),
+      event_name: FieldValue.delete(),
       actual_time_back: FieldValue.delete(),
       'last_ping.latitude': FieldValue.delete(),
       'last_ping.longitude': FieldValue.delete(),
@@ -381,3 +799,13 @@ exports.checkInBoat = onCall(CALLABLE_OPTIONS, async (request) => {
   await db.recursiveDelete(boatRef.collection('history'));
   return { boatId, checkedIn: rentalEnded };
 });
+
+module.exports.buildIdentityUpdate = buildIdentityUpdate;
+module.exports.hashInvitationValue = hashInvitationValue;
+module.exports.assertUsableInvitation = assertUsableInvitation;
+module.exports.assertInvitationIdentity = assertInvitationIdentity;
+module.exports.validateLifecycleRequest = validateLifecycleRequest;
+module.exports.sendLifecycleEmail = sendLifecycleEmail;
+module.exports.encryptLifecycleMessage = encryptLifecycleMessage;
+module.exports.decryptLifecycleMessage = decryptLifecycleMessage;
+module.exports.lifecycleJobExpired = lifecycleJobExpired;

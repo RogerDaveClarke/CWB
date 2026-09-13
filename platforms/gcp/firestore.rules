@@ -5,9 +5,17 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function hasActiveProfile() {
+    function hasMatchingProfileIdentity() {
       return isSignedIn()
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && request.auth.token.get('email_verified', false) == true
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.email is string
+        && request.auth.token.get('email', '').lower()
+          == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.email.lower();
+    }
+
+    function hasActiveProfile() {
+      return hasMatchingProfileIdentity()
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'active';
     }
 
@@ -22,8 +30,9 @@ service cloud.firestore {
     function isAdmin() {
       return hasActiveProfile()
         && liveRole() == 'admin'
-        && (request.auth.token.get('admin', false) == true
-          || request.auth.token.get('role', '') == 'admin')
+        && request.auth.token.get('admin', false) == true
+        && request.auth.token.get('role', '') == 'admin'
+        && request.auth.token.get('functionLevel', '') == liveFunctionLevel()
         && request.auth.token.get('firebase', {}).get('sign_in_second_factor', '') == 'totp';
     }
 
@@ -37,13 +46,13 @@ service cloud.firestore {
     }
 
     function hasMfaOperationsAccess() {
-      return hasActiveProfile()
-        && (liveRole() == 'admin'
-          || (liveRole() in ['manager', 'staff']
-            && request.auth.token.get('role', '') == liveRole()
-            && liveFunctionLevel() == 'operations'
-            && request.auth.token.get('functionLevel', '') == liveFunctionLevel()))
-        && request.auth.token.get('firebase', {}).get('sign_in_second_factor', '') == 'totp';
+      return isAdmin()
+        || (hasActiveProfile()
+          && liveRole() in ['manager', 'staff']
+          && request.auth.token.get('role', '') == liveRole()
+          && liveFunctionLevel() == 'operations'
+          && request.auth.token.get('functionLevel', '') == liveFunctionLevel()
+          && request.auth.token.get('firebase', {}).get('sign_in_second_factor', '') == 'totp');
     }
 
     function validBoatConfiguration(boatId) {
@@ -83,8 +92,14 @@ service cloud.firestore {
         'booked_by',
         'renter_type',
         'passenger_count',
+        'rental_type',
+        'rental_minutes',
         'time_out',
+        'time_due_back',
         'actual_time_back',
+        'use_type',
+        'event_id',
+        'event_name',
         'rental_updated_at'
       ];
     }
@@ -95,6 +110,9 @@ service cloud.firestore {
         && (!('booked_by' in request.resource.data) || request.resource.data.booked_by is string)
         && (!('renter_type' in request.resource.data) || request.resource.data.renter_type in ['Public', 'Volunteer', 'Dire Hard', 'Libary Pass'])
         && (!('passenger_count' in request.resource.data) || request.resource.data.passenger_count is int)
+        && (!('use_type' in request.resource.data) || request.resource.data.use_type in ['rental', 'event', 'authorized_use'])
+        && (!('event_id' in request.resource.data) || request.resource.data.event_id is string)
+        && (!('event_name' in request.resource.data) || request.resource.data.event_name is string)
         // A boat that is not tracking must not retain renter identity.
         && (request.resource.data.tracking_enabled == true
             || (!('booked_by' in request.resource.data)
@@ -157,31 +175,58 @@ service cloud.firestore {
           'checked_out_at',
           'checked_in_at',
           'duration_minutes',
-          'passenger_count'
+          'passenger_count',
+          'use_type',
+          'event_id',
+          'event_name'
         ])
         && request.resource.data.vessel_name is string
         && request.resource.data.duration_minutes is int;
       allow update, delete: if false;
     }
 
+    match /event_types/{typeId} {
+      allow read: if hasOperationsAccess();
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasOnly(['name', 'default_duration_minutes', 'active', 'created_at', 'updated_at'])
+        && request.resource.data.name is string
+        && request.resource.data.default_duration_minutes is int
+        && request.resource.data.default_duration_minutes >= 15
+        && request.resource.data.default_duration_minutes <= 480
+        && request.resource.data.active is bool;
+      allow delete: if false;
+    }
+
+    match /user_invitations/{invitationId} {
+      allow read, write: if false;
+    }
+
+    match /events/{eventId} {
+      allow read: if hasOperationsAccess();
+      allow write: if false;
+
+      match /boat_sessions/{boatId} {
+        allow read: if hasOperationsAccess();
+        allow write: if false;
+      }
+
+      match /activity/{activityId} {
+        allow read: if hasOperationsAccess();
+        allow write: if false;
+      }
+    }
+
     // Staff / volunteer account records. This is a NEW category of personal data
     // (staff identity), so it is never world-readable.
     match /users/{userId} {
       // A signed-in user may read their own record; only admins list others.
-      allow get: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow get: if isAdmin() || (request.auth.uid == userId && hasMatchingProfileIdentity());
       allow list: if isAdmin();
-      // Role and functionLevel are managed exclusively by the Admin SDK through
-        // callable Cloud Functions. Clients may create/update their basic login tracking metadata,
-        // but may never set role, functionLevel, status, or admin.
-      allow create: if isSignedIn()
-        && request.auth.uid == userId
-        && !request.resource.data.keys().hasAny(['role', 'functionLevel', 'status', 'admin'])
-        && request.resource.data.email is string;
-        allow update: if isAdmin()
-          || (isSignedIn()
-              && request.auth.uid == userId
-              && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'functionLevel', 'status', 'admin']));
-        allow delete: if false;
+      allow create, update, delete: if false;
+    }
+
+    match /lifecycle_notification_outbox/{notificationId} {
+      allow read, write: if false;
     }
   }
 }

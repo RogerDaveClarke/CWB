@@ -138,7 +138,7 @@ for (const control of ['timingSafeEqual', "request.method !== 'POST'", 'MAX_BODY
 }
 
 const callableAuthSource = read('platforms/gcp/cloud-ingest/authGuards.js');
-for (const control of ['if (!request.auth)', "token.admin === true || token.role === 'admin'", 'function requireMfaOperations', "['manager', 'staff'].includes(token.role)", "sign_in_second_factor !== 'totp'"]) {
+for (const control of ['if (!request.auth)', "token.admin === true && token.role === 'admin'", 'function requireMfaOperations', "['manager', 'staff'].includes(token.role)", "sign_in_second_factor !== 'totp'"]) {
   if (!callableAuthSource.includes(control)) failures.push(`Callable authentication helper is missing control: ${control}`);
 }
 

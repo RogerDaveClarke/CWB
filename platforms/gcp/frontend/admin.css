@@ -1,4 +1,4 @@
-.header-command, .primary-button, .secondary-button, .danger-button {
+.primary-button, .secondary-button, .danger-button {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -13,8 +13,8 @@
 /* This sheet loads after tailwind.css, so the display rule above would
    otherwise beat Tailwind's single-class .hidden in the cascade. */
 .header-command.hidden, .primary-button.hidden, .secondary-button.hidden, .danger-button.hidden { display: none; }
-.header-command, .secondary-button { border: 1px solid var(--border); background: var(--panel-raised); color: var(--muted); }
-.header-command:hover, .secondary-button:hover { border-color: var(--border-strong); color: var(--text); }
+.secondary-button { border: 1px solid var(--border); background: var(--panel-raised); color: var(--muted); }
+.secondary-button:hover { border-color: var(--border-strong); color: var(--text); }
 .primary-button { border: 1px solid #0284c7; background: #0284c7; color: white; }
 .primary-button:hover { background: #0369a1; }
 .danger-button { margin-right: auto; border: 1px solid rgb(248 113 113 / .45); background: rgb(248 113 113 / .08); color: #f87171; }
@@ -99,8 +99,6 @@
 }
 
 @media (max-width: 520px) {
-    .header-command span { display: none; }
-    .header-command { width: 34px; padding: 0; }
     .form-grid.two-columns { grid-template-columns: 1fr; }
     .schedule-row { grid-template-columns: 92px 1fr 1fr; gap: 6px; }
     .section-heading { align-items: flex-start; flex-direction: column; }

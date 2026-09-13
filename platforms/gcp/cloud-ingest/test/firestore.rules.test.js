@@ -51,7 +51,11 @@ test.before(async () => {
 test.after(async () => environment?.cleanup());
 
 function authenticatedDb(uid, token = {}) {
-  return environment.authenticatedContext(uid, token).firestore();
+  return environment.authenticatedContext(uid, {
+    email: `${uid}@cwb.org`,
+    email_verified: true,
+    ...token
+  }).firestore();
 }
 
 test('anonymous and unassigned users cannot read operational data', async () => {
@@ -94,6 +98,7 @@ test('users can read only their own profile while MFA admins can list users', as
   const adminDb = authenticatedDb('admin-1', {
     admin: true,
     role: 'admin',
+    functionLevel: 'administration',
     firebase: { sign_in_second_factor: 'totp' }
   });
   const result = await assertSucceeds(getDocs(collection(adminDb, 'users')));
@@ -114,4 +119,22 @@ test('live profiles override stale privileged token claims', async () => {
 
   const mismatchedRole = authenticatedDb('staff-1', { role: 'manager', functionLevel: 'operations' });
   await assertFails(getDoc(doc(mismatchedRole, 'boats/70b3d57ed0000001')));
+
+  const mismatchedEmail = authenticatedDb('staff-1', {
+    email: 'other@cwb.org', role: 'staff', functionLevel: 'operations'
+  });
+  await assertFails(getDoc(doc(mismatchedEmail, 'boats/70b3d57ed0000001')));
+});
+
+test('clients cannot mutate account profiles or lifecycle outbox records', async () => {
+  const userDb = authenticatedDb('user-1', { role: 'staff', functionLevel: 'operations' });
+  const adminDb = authenticatedDb('admin-1', {
+    admin: true,
+    role: 'admin',
+    functionLevel: 'administration',
+    firebase: { sign_in_second_factor: 'totp' }
+  });
+  await assertFails(updateDoc(doc(userDb, 'users/user-1'), { displayName: 'Changed' }));
+  await assertFails(updateDoc(doc(adminDb, 'users/user-1'), { status: 'suspended' }));
+  await assertFails(getDoc(doc(adminDb, 'lifecycle_notification_outbox/job-1')));
 });

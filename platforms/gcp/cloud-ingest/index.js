@@ -158,6 +158,9 @@ exports.telemetryIngest = onRequest({
 // Exported alongside the telemetry ingest HTTP function.
 const userAdmin = require('./userAdmin');
 exports.inviteUser = userAdmin.inviteUser;
+exports.cancelUserInvitation = userAdmin.cancelUserInvitation;
+exports.acceptUserInvitation = userAdmin.acceptUserInvitation;
+exports.completeUserInvitation = userAdmin.completeUserInvitation;
 exports.updateUserProfile = userAdmin.updateUserProfile;
 exports.setUserRole = userAdmin.setUserRole;
 exports.disableUser = userAdmin.disableUser;
@@ -165,9 +168,16 @@ exports.enableUser = userAdmin.enableUser;
 exports.deleteUser = userAdmin.deleteUser;
 exports.resetUserMfa = userAdmin.resetUserMfa;
 exports.listUsers = userAdmin.listUsers;
-exports.claimDefaultRole = userAdmin.claimDefaultRole;
 exports.reportSessionExit = userAdmin.reportSessionExit;
+exports.recordUserLogin = userAdmin.recordUserLogin;
+exports.recordMfaEnrollment = userAdmin.recordMfaEnrollment;
+exports.retryLifecycleNotifications = userAdmin.retryLifecycleNotifications;
 exports.checkInBoat = userAdmin.checkInBoat;
+
+const eventOperations = require('./eventOperations');
+exports.createEvent = eventOperations.createEvent;
+exports.setEventStatus = eventOperations.setEventStatus;
+exports.checkOutEventBoat = eventOperations.checkOutEventBoat;
 
 // Boat tracker configuration downlinks via the ChirpStack LoRaWAN gateway.
 const boatConfig = require('./boatConfig');
@@ -175,6 +185,7 @@ exports.pushBoatConfig = boatConfig.pushBoatConfig;
 
 const retention = require('./retention');
 exports.purgeExpiredTrails = retention.purgeExpiredTrails;
+exports.purgeExpiredInvitations = retention.purgeExpiredInvitations;
 
 const identityReconciliation = require('./identityReconciliation');
 exports.reconcileIdentityState = identityReconciliation.reconcileIdentityState;

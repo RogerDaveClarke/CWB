@@ -18,7 +18,8 @@
 
 const uint8_t AMG8833_ADDRESS = 0x68;
 
-SX1262 radio = new Module(LORA_NSS, LORA_DIO1, LORA_RST, LORA_BUSY);
+Module radioModule(LORA_NSS, LORA_DIO1, LORA_RST, LORA_BUSY);
+SX1262 radio(&radioModule);
 LoRaWANNode node(&radio, &US915);
 SFE_UBLOX_GNSS gps;
 RV1805 rtc;

@@ -42,6 +42,14 @@ class LeafletMapElement extends HTMLElement {
         }).addTo(this.map);
     }
 
+    popupContent({ title, statusString, batteryMv }) {
+        const content = document.createElement('div');
+        const label = document.createElement('strong');
+        label.textContent = `Vessel ID: ${title}`;
+        content.append(label, document.createElement('br'), `Status: ${statusString}`, document.createElement('br'), `Battery: ${batteryMv} mV`);
+        return content;
+    }
+
     updateMarkers(vessels) {
         vessels.forEach(vessel => {
             const { title, latitude, longitude, statusString, batteryMv } = vessel;
@@ -53,11 +61,7 @@ class LeafletMapElement extends HTMLElement {
                 this.markers[title] = L.marker([latitude, longitude]).addTo(this.map);
             }
             
-            this.markers[title].bindPopup(`
-                <strong>Vessel ID: ${title}</strong><br>
-                Status: ${statusString}<br>
-                Battery: ${batteryMv} mV
-            `);
+            this.markers[title].bindPopup(this.popupContent({ title, statusString, batteryMv }));
         });
     }
 }

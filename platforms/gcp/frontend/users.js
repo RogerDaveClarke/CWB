@@ -1,4 +1,5 @@
 import { getFirebase, initAuthGuard, showAuthModal, signOut, isConfigValid } from "./auth-guard.js";
+import { initHeaderControls, setHeaderUser } from "./header-nav.js";
 
 const connectionEl = document.getElementById("usersConnection");
 const adminPanel = document.getElementById("adminPanel");
@@ -46,11 +47,14 @@ const state = {
     filteredUsers: [],
     currentUser: null,
     editingUid: null,
+    editingEmail: null,
     searchQuery: "",
     roleFilter: "all",
     statusFilter: "all",
     functions: null,
     httpsCallable: null,
+    auth: null,
+    authModule: null,
     db: null,
     firestoreModule: null,
     // True once the listUsers callable has returned for this session; fast
@@ -91,12 +95,6 @@ function icon(name, className = "h-4 w-4") {
     element.dataset.lucide = name;
     element.className = className;
     return element;
-}
-
-function setIconText(control, iconName, text) {
-    const label = document.createElement("span");
-    label.textContent = text;
-    control.replaceChildren(icon(iconName), label);
 }
 
 function tableMessage(message, className = "empty-cell") {
@@ -187,9 +185,10 @@ function renderUsers() {
         const roleLabel = role.charAt(0).toUpperCase() + role.slice(1);
 
         const func = user.functionLevel ? user.functionLevel.charAt(0).toUpperCase() + user.functionLevel.slice(1) : "Operations";
+        const isInvitation = user.status === "invited";
         const isSuspended = user.status === "suspended" || user.disabled;
-        const statusBadgeClass = isSuspended ? "badge-status-suspended" : "badge-status-active";
-        const statusLabel = isSuspended ? "Suspended" : "Active";
+        const statusBadgeClass = isSuspended || isInvitation ? "badge-status-suspended" : "badge-status-active";
+        const statusLabel = isInvitation ? "Invitation sent" : isSuspended ? "Suspended" : "Active";
         const mfaBadgeClass = user.mfaEnrolled ? "badge-mfa-yes" : "badge-mfa-no";
         const mfaLabel = user.mfaEnrolled ? "Enrolled" : "Not set";
         const isSelf = state.currentUser && state.currentUser.uid === user.uid;
@@ -235,14 +234,18 @@ function renderUsers() {
 
         const actionCell = document.createElement("td");
         const actions = div("flex items-center justify-end gap-1.5 whitespace-nowrap");
-        actions.append(
-            userActionButton("edit-user", `Edit ${accountLabel}`, "pencil"),
-            userActionButton("reset-mfa", `Reset 2FA for ${accountLabel}`, "shield-alert", "h-4 w-4 text-sky-400"),
-            isSuspended
-                ? userActionButton("enable-user", `Activate ${accountLabel}`, "user-check", "h-4 w-4 text-emerald-400")
-                : userActionButton("suspend-user", `Suspend ${accountLabel}`, "user-x", "h-4 w-4 text-amber-400", isSelf),
-            userActionButton("delete-user", `Delete ${accountLabel}`, "trash-2", "h-4 w-4 text-red-400", isSelf)
-        );
+        if (isInvitation) {
+            actions.append(userActionButton("cancel-invitation", `Cancel invitation for ${accountLabel}`, "mail-x", "h-4 w-4 text-red-400"));
+        } else {
+            actions.append(
+                userActionButton("edit-user", `Edit ${accountLabel}`, "pencil"),
+                userActionButton("reset-mfa", `Reset 2FA for ${accountLabel}`, "shield-alert", "h-4 w-4 text-sky-400"),
+                isSuspended
+                    ? userActionButton("enable-user", `Activate ${accountLabel}`, "user-check", "h-4 w-4 text-emerald-400")
+                    : userActionButton("suspend-user", `Suspend ${accountLabel}`, "user-x", "h-4 w-4 text-amber-400", isSelf),
+                userActionButton("delete-user", `Delete ${accountLabel}`, "trash-2", "h-4 w-4 text-red-400", isSelf)
+            );
+        }
         actionCell.appendChild(actions);
         row.appendChild(actionCell);
 
@@ -358,15 +361,62 @@ function hideFormMessage() {
     formMessage.textContent = "";
 }
 
+function requestEmailConfirmation(user, action) {
+    const email = String(user?.email || "").trim();
+    const confirmationEmail = window.prompt(`To ${action} this account, type the full email address exactly:\n\n${email}`);
+    if (confirmationEmail == null) return null;
+    if (confirmationEmail.trim() !== email) {
+        alert("The email address did not match. No changes were made.");
+        return null;
+    }
+    return confirmationEmail.trim();
+}
+
+function requestSuspension(user) {
+    const reason = window.prompt(`Explain why ${user.email} is being suspended. This explanation will be emailed to the user.`);
+    if (reason == null) return null;
+    const normalizedReason = reason.trim();
+    if (normalizedReason.length < 10 || normalizedReason.length > 1000) {
+        alert("Enter an explanation between 10 and 1000 characters.");
+        return null;
+    }
+    const confirmationEmail = requestEmailConfirmation(user, "suspend");
+    return confirmationEmail ? { confirmationEmail, reason: normalizedReason } : null;
+}
+
+function requestReactivationAccess() {
+    const role = window.prompt("Assign a role: admin, manager, staff, or volunteer", "staff");
+    if (role == null) return null;
+    const normalizedRole = role.trim().toLowerCase();
+    if (!["admin", "manager", "staff", "volunteer"].includes(normalizedRole)) {
+        alert("Enter admin, manager, staff, or volunteer.");
+        return null;
+    }
+    const functionLevel = window.prompt("Assign a function level: operations or administration", "operations");
+    if (functionLevel == null) return null;
+    const normalizedFunction = functionLevel.trim().toLowerCase();
+    if (!["operations", "administration"].includes(normalizedFunction)
+        || (normalizedRole === "volunteer" && normalizedFunction === "administration")) {
+        alert("Enter a compatible function level.");
+        return null;
+    }
+    return { role: normalizedRole, functionLevel: normalizedFunction };
+}
+
+function reportNotificationFailure(action, email) {
+    alert(`${action} completed, but the notification email to ${email} is queued for retry. Contact the user through another verified channel if delivery remains unsuccessful.`);
+}
+
 function openDrawer(user = null) {
     state.editingUid = user?.uid || null;
+    state.editingEmail = user?.email || null;
     hideFormMessage();
 
     if (user) {
         drawerTitle.textContent = "Edit User";
         userEmailInput.value = user.email || "";
-        userEmailInput.disabled = true;
-        emailHelpText.textContent = "Email address cannot be changed once created.";
+        userEmailInput.disabled = false;
+        emailHelpText.textContent = "Changing this updates the sign-in email and signs the user out.";
         userDisplayNameInput.value = user.displayName || "";
         userAddressInput.value = user.address || "";
         userRoleSelect.value = user.role || "staff";
@@ -411,6 +461,7 @@ function closeDrawer() {
     userDrawer.setAttribute("aria-hidden", "true");
     drawerBackdrop.classList.add("hidden");
     state.editingUid = null;
+    state.editingEmail = null;
     hideFormMessage();
 }
 
@@ -468,6 +519,12 @@ function wireEventListeners() {
             return;
         }
 
+        const emailChanged = state.editingUid
+            && email.toLowerCase() !== (state.editingEmail || "").toLowerCase();
+        if (emailChanged && !confirm(`Change the sign-in email to ${email}? The user will be signed out and must verify the corrected address.`)) {
+            return;
+        }
+
         saveUserButton.disabled = true;
         saveUserButton.querySelector("span").textContent = "Saving…";
 
@@ -475,12 +532,13 @@ function wireEventListeners() {
             if (state.editingUid) {
                 await callFunction("updateUserProfile", {
                     uid: state.editingUid,
+                    email,
                     displayName,
                     address,
                     role,
                     functionLevel
                 });
-                patchUser(state.editingUid, { displayName, address, role, functionLevel });
+                patchUser(state.editingUid, { email, displayName, address, role, functionLevel });
                 showFormMessage("User profile updated successfully.", true);
             } else {
                 const created = await callFunction("inviteUser", {
@@ -490,17 +548,20 @@ function wireEventListeners() {
                     role,
                     functionLevel
                 });
-                const uid = created?.data?.uid;
-                if (uid && !state.users.some(u => u.uid === uid)) {
-                    state.users.push({
-                        uid, email, displayName, address, role, functionLevel,
-                        status: "active", disabled: false, mfaEnrolled: false,
-                        loginCount: 0, lastLogin: null, createdAt: null
+                const token = created?.data?.token;
+                const invitationId = created?.data?.invitationId;
+                try {
+                    await state.authModule.sendSignInLinkToEmail(state.auth, email, {
+                        url: `${window.location.origin}/mfa#invite=${encodeURIComponent(token)}`,
+                        handleCodeInApp: true
                     });
-                    updateKPIs(state.users);
-                    renderUsers();
+                } catch (deliveryError) {
+                    if (invitationId) {
+                        await callFunction("cancelUserInvitation", { invitationId }).catch(() => null);
+                    }
+                    throw deliveryError;
                 }
-                showFormMessage(`User ${email} created and permissions assigned.`, true);
+                showFormMessage(`Invitation sent to ${email}. Permissions activate after the recipient verifies the link and enrolls 2FA.`, true);
             }
 
             loadUsers();
@@ -518,19 +579,18 @@ function wireEventListeners() {
     deleteUserButton.addEventListener("click", async () => {
         if (!state.editingUid) return;
         const user = state.users.find(u => u.uid === state.editingUid);
-        const name = user?.displayName || user?.email || "this user";
-        if (!confirm(`Are you sure you want to permanently delete ${name}? This cannot be undone.`)) {
-            return;
-        }
+        const confirmationEmail = requestEmailConfirmation(user, "permanently delete");
+        if (!confirmationEmail) return;
 
         deleteUserButton.disabled = true;
         deleteUserButton.querySelector("span").textContent = "Deleting…";
 
         try {
-            await callFunction("deleteUser", { uid: state.editingUid });
+            const result = await callFunction("deleteUser", { uid: state.editingUid, confirmationEmail });
             removeUserLocally(state.editingUid);
             closeDrawer();
             loadUsers();
+            if (result.data?.notificationSent === false) reportNotificationFailure("Account deletion", user.email);
         } catch (error) {
             console.error("Delete user failed", error);
             showFormMessage(error.message || "Failed to delete user.");
@@ -551,6 +611,19 @@ function wireEventListeners() {
         const user = state.users.find(u => u.uid === uid);
         if (!user) return;
 
+        if (button.classList.contains("cancel-invitation")) {
+            if (!confirm(`Cancel the invitation for ${user.email}? The emailed link will no longer work.`)) return;
+            button.disabled = true;
+            try {
+                await callFunction("cancelUserInvitation", { invitationId: user.invitationId });
+                removeUserLocally(uid);
+            } catch (error) {
+                alert(error.message || "Unable to cancel invitation.");
+                button.disabled = false;
+            }
+            return;
+        }
+
         if (button.classList.contains("edit-user")) {
             openDrawer(user);
             return;
@@ -565,22 +638,35 @@ function wireEventListeners() {
                     loadUsers();
                 }
             } else if (button.classList.contains("suspend-user")) {
-                if (confirm(`Suspend access for ${user.displayName || user.email}? The user will be immediately logged out and unable to access the system.`)) {
-                    await callFunction("disableUser", { uid });
-                    patchUser(uid, { status: "suspended", disabled: true, role: null, functionLevel: null });
+                const suspension = requestSuspension(user);
+                if (suspension) {
+                    const result = await callFunction("disableUser", { uid, ...suspension });
+                    if (result.data?.operationCompleted) {
+                        patchUser(uid, { status: "suspended", disabled: true, role: null, functionLevel: null });
+                    } else {
+                        alert("Account suspension is queued and will be retried automatically.");
+                    }
                     loadUsers();
+                    if (result.data?.operationCompleted && result.data?.notificationSent === false) reportNotificationFailure("Account suspension", user.email);
                 }
             } else if (button.classList.contains("enable-user")) {
-                const role = user.role || "staff";
-                const functionLevel = user.functionLevel || "operations";
+                const access = requestReactivationAccess();
+                if (!access) return;
+                const { role, functionLevel } = access;
                 await callFunction("enableUser", { uid, role, functionLevel });
                 patchUser(uid, { status: "active", disabled: false, role, functionLevel });
                 loadUsers();
             } else if (button.classList.contains("delete-user")) {
-                if (confirm(`Permanently delete account for ${user.displayName || user.email}? All permissions and user metadata will be removed.`)) {
-                    await callFunction("deleteUser", { uid });
-                    removeUserLocally(uid);
+                const confirmationEmail = requestEmailConfirmation(user, "permanently delete");
+                if (confirmationEmail) {
+                    const result = await callFunction("deleteUser", { uid, confirmationEmail });
+                    if (result.data?.operationCompleted) {
+                        removeUserLocally(uid);
+                    } else {
+                        alert("Account deletion is queued and will be retried automatically.");
+                    }
                     loadUsers();
+                    if (result.data?.operationCompleted && result.data?.notificationSent === false) reportNotificationFailure("Account deletion", user.email);
                 }
             }
         } catch (error) {
@@ -604,6 +690,8 @@ async function init() {
     const firebase = await getFirebase();
     state.functions = firebase.functions;
     state.httpsCallable = firebase.functionsModule.httpsCallable;
+    state.auth = firebase.auth;
+    state.authModule = firebase.authModule;
     state.db = firebase.db;
     state.firestoreModule = firebase.firestoreModule;
 
@@ -616,8 +704,7 @@ async function init() {
             adminPanel.classList.remove("hidden");
             deniedPanel.classList.add("hidden");
 
-            setIconText(authActionButton, "log-out", user.displayName || user.email || "Sign out");
-            if (window.lucide) window.lucide.createIcons();
+            setHeaderUser(authActionButton, user);
 
             loadUsersFast();
             loadUsers();
@@ -639,8 +726,7 @@ async function init() {
                 deniedText.textContent = "Administrator privileges are required to access Account Administration.";
             }
 
-            setIconText(authActionButton, user ? "log-out" : "log-in", user ? "Sign out" : "Sign in");
-            if (window.lucide) window.lucide.createIcons();
+            setHeaderUser(authActionButton, user);
         },
         onSignedOut: () => {
             state.currentUser = null;
@@ -651,12 +737,12 @@ async function init() {
             deniedText.textContent = "Sign in with an Administrator account is required.";
             setConnection("", "Sign in required");
 
-            setIconText(authActionButton, "log-in", "Sign in");
-            if (window.lucide) window.lucide.createIcons();
+            setHeaderUser(authActionButton, null);
 
             showAuthModal("signIn");
         }
     });
 }
 
+initHeaderControls();
 init();

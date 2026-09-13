@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en" class="auth-pending">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark light">
+    <title>CWB Event Type Administration</title>
+    <link rel="stylesheet" href="./auth-boot.css">
+    <link rel="stylesheet" href="./vendor/tailwind.css">
+    <link rel="stylesheet" href="./dashboard.css">
+    <link rel="stylesheet" href="./admin.css">
+</head>
+<body class="h-screen overflow-hidden bg-zinc-950 text-zinc-100 antialiased">
+    <div class="flex h-full flex-col">
+        <header class="app-header">
+            <div class="flex min-w-0 items-center gap-3">
+                <a href="/" aria-label="Return to operations dashboard"><img class="brand-logo" src="./assets/CWBLogo.png" alt="The Center for Wooden Boats"></a>
+                <div class="min-w-0"><h1 class="brand-title truncate text-sm font-semibold uppercase tracking-wide sm:text-base">Event Type Administration</h1><p class="truncate text-[11px] text-zinc-400">Event categories and default trip durations</p></div>
+            </div>
+            <div class="flex items-center gap-2">
+                <div id="typeConnection" class="connection-pill" role="status"><span class="status-dot"></span><span class="hidden sm:inline">Loading</span></div>
+                <time id="headerClock" class="hidden font-mono text-xs text-zinc-400 md:block"></time>
+                <button id="authActionButton" class="header-command header-auth-button" type="button" title="Sign in" aria-label="Sign in"><i data-lucide="log-in" class="h-4 w-4"></i><span class="header-user-name">Sign in</span></button>
+                <a href="/events" class="icon-button" title="Event operations" aria-label="Event operations"><i data-lucide="calendar-range" class="h-4 w-4"></i></a>
+                <a href="/event-types" class="icon-button" title="Event type administration" aria-label="Event type administration" aria-current="page"><i data-lucide="tags" class="h-4 w-4"></i></a>
+                <a href="/history" class="icon-button" title="Boat use history" aria-label="Boat use history"><i data-lucide="history" class="h-4 w-4"></i></a>
+                <a href="/admin" class="icon-button" title="Fleet administration" aria-label="Fleet administration"><i data-lucide="settings" class="h-4 w-4"></i></a>
+                <a href="/users" class="icon-button" title="Account administration" aria-label="Account administration"><i data-lucide="users" class="h-4 w-4"></i></a>
+                <button id="fullscreenToggle" class="icon-button" type="button" title="Toggle fullscreen" aria-label="Toggle fullscreen"><i data-lucide="maximize" class="h-4 w-4"></i></button>
+            </div>
+        </header>
+        <main class="admin-workspace">
+            <section class="admin-content with-banner" aria-labelledby="eventTypesHeading">
+                <div class="admin-toolbar">
+                    <div><p class="eyebrow">Configuration</p><h2 id="eventTypesHeading">Event types</h2><p class="admin-subtitle">Types provide consistent names and default trip lengths when staff plan events.</p></div>
+                    <div class="admin-actions"><button id="seedTypesButton" class="secondary-button" type="button"><i data-lucide="list-plus" class="h-4 w-4"></i>Add CWB defaults</button><button id="addTypeButton" class="primary-button" type="button"><i data-lucide="plus" class="h-4 w-4"></i>Add event type</button></div>
+                </div>
+                <div class="livery-banner"><i data-lucide="info" class="h-4 w-4 shrink-0 text-sky-400"></i><div class="livery-copy"><strong>Operational configuration</strong><span>Deactivating a type removes it from new events without changing existing event records.</span></div></div>
+                <div class="admin-table-shell"><table class="admin-table"><thead><tr><th>Event type</th><th>Default trip</th><th>Status</th><th>Updated</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="typeTableBody"><tr><td colspan="5" class="empty-cell">Loading event types...</td></tr></tbody></table></div>
+                <div class="admin-footer"><span id="typeCount">0 event types</span><span>Inactive types remain available to historical events.</span></div>
+            </section>
+        </main>
+    </div>
+    <div id="drawerBackdrop" class="drawer-backdrop hidden"></div>
+    <aside id="typeDrawer" class="boat-drawer" aria-labelledby="drawerTitle" aria-hidden="true">
+        <form id="typeForm" class="drawer-form">
+            <div class="drawer-header"><div><p class="eyebrow">Event configuration</p><h2 id="drawerTitle">Add event type</h2></div><button id="closeDrawerButton" class="icon-button" type="button" title="Close editor" aria-label="Close editor"><i data-lucide="x" class="h-4 w-4"></i></button></div>
+            <div id="formMessage" class="form-message hidden" role="alert"></div>
+            <fieldset class="form-section"><legend>Definition</legend><div class="form-grid two-columns"><label><span>Name</span><input id="typeName" type="text" maxlength="80" placeholder="Sunday Public Sail" required></label><label><span>Default trip duration</span><select id="typeDuration" required><option value="30">30 minutes</option><option value="45">45 minutes</option><option value="60" selected>60 minutes</option><option value="90">90 minutes</option><option value="120">2 hours</option><option value="180">3 hours</option></select></label></div></fieldset>
+            <fieldset class="form-section"><legend>Availability</legend><div class="form-grid"><label class="livery-toggle"><input id="typeActive" type="checkbox" checked><span>Available when creating new events</span></label></div></fieldset>
+            <div class="drawer-actions"><button id="cancelButton" class="secondary-button" type="button">Cancel</button><button id="saveTypeButton" class="primary-button" type="submit"><i data-lucide="save" class="h-4 w-4"></i>Save event type</button></div>
+        </form>
+    </aside>
+    <script src="./vendor/lucide/lucide.js"></script>
+    <script type="module" src="./event-types.js"></script>
+</body>
+</html>

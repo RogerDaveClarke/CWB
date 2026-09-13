@@ -24,9 +24,12 @@
             </div>
             <div class="flex items-center gap-2">
                 <div id="adminConnection" class="connection-pill" role="status"><span class="status-dot"></span><span class="hidden sm:inline">Loading</span></div>
-                <a href="/users" class="header-command"><i data-lucide="users" class="h-4 w-4"></i><span class="hidden sm:inline">Accounts</span></a>
-                <a href="/" class="header-command"><i data-lucide="map" class="h-4 w-4"></i><span class="hidden sm:inline">Operations</span></a>
-                <button id="signInButton" class="header-command" type="button"><i data-lucide="log-in" class="h-4 w-4"></i><span>Sign in</span></button>
+                <time id="headerClock" class="hidden font-mono text-xs text-zinc-400 md:block"></time>
+                <button id="signInButton" class="header-command header-auth-button" type="button" title="Sign in" aria-label="Sign in"><i data-lucide="log-in" class="h-4 w-4"></i><span class="header-user-name">Sign in</span></button>
+                <a href="/history" class="icon-button" title="Rental history" aria-label="Rental history"><i data-lucide="history" class="h-4 w-4"></i></a>
+                <a href="/admin" class="icon-button" title="Fleet administration" aria-label="Fleet administration" aria-current="page"><i data-lucide="settings" class="h-4 w-4"></i></a>
+                <a href="/users" class="icon-button" title="Account administration" aria-label="Account administration"><i data-lucide="users" class="h-4 w-4"></i></a>
+                <button id="fullscreenToggle" class="icon-button" type="button" title="Toggle fullscreen" aria-label="Toggle fullscreen"><i data-lucide="maximize" class="h-4 w-4"></i></button>
             </div>
         </header>
 

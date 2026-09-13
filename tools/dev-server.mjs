@@ -8,6 +8,8 @@ import { loadEnv } from "./load-env.mjs";
 const frontendRoot = fileURLToPath(new URL("../platforms/gcp/frontend/", import.meta.url)).replace(/[\\/]$/, "");
 const env = loadEnv("../local.env");
 const port = Number(process.env.PORT || env.PORT || 5173);
+const maxConcurrentRequests = 32;
+let activeRequests = 0;
 
 // Build the firebase-config.js module from local.env so secrets stay out of the repo.
 function firebaseConfigModule() {
@@ -32,6 +34,13 @@ const mimeTypes = {
 };
 
 const server = createServer(async (request, response) => {
+    if (activeRequests >= maxConcurrentRequests) {
+        response.writeHead(503, { "Retry-After": "1" });
+        response.end("Server busy");
+        return;
+    }
+    activeRequests += 1;
+    response.once("close", () => { activeRequests -= 1; });
     const requestPath = decodeURIComponent((request.url || "/").split("?")[0]);
 
     if (requestPath === "/firebase-config.js") {
@@ -71,3 +80,7 @@ server.listen(port, "127.0.0.1", () => {
     console.log(`CWB frontend available at http://localhost:${port}/`);
     console.log(env.FIREBASE_PROJECT_ID ? `Firebase project: ${env.FIREBASE_PROJECT_ID}` : "local.env not configured - pages will run in demo mode");
 });
+
+server.requestTimeout = 10_000;
+server.headersTimeout = 5_000;
+server.maxRequestsPerSocket = 100;

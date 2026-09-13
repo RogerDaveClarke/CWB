@@ -1,14 +1,16 @@
 import { firebaseConfig } from "./firebase-config.js";
-import { initAuthGuard, showAuthModal, isConfigValid } from "./auth-guard.js";
+import { initAuthGuard, showAuthModal, signOut, isConfigValid } from "./auth-guard.js";
+import { initHeaderControls, setHeaderUser } from "./header-nav.js";
 import { collection, limit, onSnapshot, orderBy, query } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 const DEMO_RENTAL_HISTORY_KEY = "cwbDemoRentalHistory";
-const state = { records: [], search: "" };
+const state = { records: [], search: "", user: null };
 const elements = {
     tableBody: document.getElementById("historyTableBody"),
     count: document.getElementById("historyCount"),
     search: document.getElementById("historySearch"),
-    connection: document.getElementById("historyConnection")
+    connection: document.getElementById("historyConnection"),
+    signIn: document.getElementById("signInButton")
 };
 
 function toDate(value) {
@@ -18,10 +20,6 @@ function toDate(value) {
     if (typeof value.seconds === "number") return new Date(value.seconds * 1000);
     const parsed = new Date(value);
     return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-function escapeHtml(value) {
-    return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
 }
 
 function formatDate(value) {
@@ -42,7 +40,12 @@ function formatDuration(minutes, hasTimes) {
 
 function setConnection(mode, label) {
     elements.connection.className = `connection-pill ${mode}`;
-    elements.connection.innerHTML = `<span class="status-dot"></span><span class="hidden sm:inline">${escapeHtml(label)}</span>`;
+    const status = document.createElement("span");
+    status.className = "status-dot";
+    const text = document.createElement("span");
+    text.className = "hidden sm:inline";
+    text.textContent = label;
+    elements.connection.replaceChildren(status, text);
 }
 
 function normalizeRecord(raw) {
@@ -64,19 +67,38 @@ function renderTable() {
 
     elements.count.textContent = `${records.length} ${records.length === 1 ? "rental" : "rentals"}`;
     if (!records.length) {
-        elements.tableBody.innerHTML = `<tr><td colspan="8" class="empty-cell">No completed rentals recorded yet.</td></tr>`;
+        const row = document.createElement("tr");
+        const cell = document.createElement("td");
+        cell.colSpan = 8;
+        cell.className = "empty-cell";
+        cell.textContent = "No completed rentals recorded yet.";
+        row.append(cell);
+        elements.tableBody.replaceChildren(row);
         return;
     }
-    elements.tableBody.innerHTML = records.map(record => `<tr>
-        <td><span class="vessel-name">${escapeHtml(record.vesselName)}</span></td>
-        <td><span class="data-value">${escapeHtml(record.boatType)}</span></td>
-        <td><span class="data-value">${escapeHtml(record.renterType)}</span></td>
-        <td><span class="data-value">${formatDate(record.checkedOutAt || record.checkedInAt)}</span></td>
-        <td><span class="data-value">${formatClock(record.checkedOutAt)}</span></td>
-        <td><span class="data-value">${formatClock(record.checkedInAt)}</span></td>
-        <td><span class="data-value">${formatDuration(record.durationMinutes, Boolean(record.checkedOutAt && record.checkedInAt))}</span></td>
-        <td><span class="data-value">${record.passengerCount || "—"}</span></td>
-    </tr>`).join("");
+    const rows = records.map(record => {
+        const row = document.createElement("tr");
+        const values = [
+            [record.vesselName, "vessel-name"],
+            [record.boatType, "data-value"],
+            [record.renterType, "data-value"],
+            [formatDate(record.checkedOutAt || record.checkedInAt), "data-value"],
+            [formatClock(record.checkedOutAt), "data-value"],
+            [formatClock(record.checkedInAt), "data-value"],
+            [formatDuration(record.durationMinutes, Boolean(record.checkedOutAt && record.checkedInAt)), "data-value"],
+            [record.passengerCount || "—", "data-value"]
+        ];
+        for (const [value, className] of values) {
+            const cell = document.createElement("td");
+            const text = document.createElement("span");
+            text.className = className;
+            text.textContent = String(value);
+            cell.append(text);
+            row.append(cell);
+        }
+        return row;
+    });
+    elements.tableBody.replaceChildren(...rows);
 }
 
 function defaultDemoHistory() {
@@ -105,7 +127,9 @@ async function startFirebase() {
     }
     try {
         await initAuthGuard({ roles: ["admin", "manager", "staff"], functionLevels: ["operations", "administration"] }, {
-            onReady: ({ db }) => {
+            onReady: ({ user, db }) => {
+                state.user = user;
+                setHeaderUser(elements.signIn, user);
                 const historyQuery = query(collection(db, "rental_history"), orderBy("checked_in_at", "desc"), limit(500));
                 onSnapshot(historyQuery, snapshot => {
                     if (snapshot.empty) {
@@ -123,11 +147,15 @@ async function startFirebase() {
                     elements.tableBody.innerHTML = `<tr><td colspan="8" class="empty-cell">Unable to load rental history. Sign in with an authorized account.</td></tr>`;
                 });
             },
-            onDenied: () => {
+            onDenied: (reason, user) => {
+                state.user = user;
+                setHeaderUser(elements.signIn, user);
                 setConnection("error", "Access restricted");
                 elements.tableBody.innerHTML = `<tr><td colspan="8" class="empty-cell">Access restricted. Sign in with an authorized account.</td></tr>`;
             },
             onSignedOut: () => {
+                state.user = null;
+                setHeaderUser(elements.signIn, null);
                 setConnection("", "Sign in required");
                 elements.tableBody.innerHTML = `<tr><td colspan="8" class="empty-cell">Sign in required to view rental history.</td></tr>`;
             }
@@ -139,5 +167,10 @@ async function startFirebase() {
 }
 
 elements.search.addEventListener("input", event => { state.search = event.target.value.trim().toLowerCase(); renderTable(); });
+elements.signIn.addEventListener("click", async () => {
+    if (state.user) await signOut();
+    else showAuthModal("signIn");
+});
 lucide.createIcons();
+initHeaderControls();
 startFirebase();

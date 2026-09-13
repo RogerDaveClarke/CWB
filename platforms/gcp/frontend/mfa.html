@@ -11,22 +11,104 @@
     <link rel="stylesheet" href="./admin.css">
     <script src="./vendor/lucide/lucide.js" defer></script>
     <style>
+        body {
+            min-height: 100vh;
+            margin: 0;
+            background: #f4f4f5;
+        }
         .mfa-page-container {
             min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            background: var(--bg);
+            display: grid;
+            place-items: center;
+            padding: 24px;
+            background: linear-gradient(145deg, #f4f4f5 0%, #ffffff 48%, #e7eef2 100%);
             color: var(--text);
         }
-        .mfa-card {
-            background: var(--panel);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            box-shadow: 0 10px 30px -5px rgb(0 0 0 / 0.3);
-            max-width: 540px;
+        .mfa-shell {
             width: 100%;
-            margin: 0 auto;
+            max-width: 560px;
+            min-width: 0;
+        }
+        .mfa-brand {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 14px;
+            margin-bottom: 16px;
+            text-align: left;
+        }
+        .mfa-brand img {
+            width: 132px;
+            height: 40px;
+            object-fit: contain;
+        }
+        .mfa-brand h1 {
+            margin: 0;
+            color: #18181b;
+            font-size: 18px;
+            font-weight: 750;
+            line-height: 1.2;
+        }
+        .mfa-brand p {
+            margin: 3px 0 0;
+            color: #71717a;
+            font-size: 12px;
+        }
+        .mfa-card {
+            background: #ffffff;
+            border: 1px solid #d4d4d8;
+            border-radius: 8px;
+            box-shadow: 0 18px 48px rgb(24 24 27 / 0.14);
+            width: 100%;
+            padding: 28px;
             overflow: hidden;
+        }
+        .mfa-intro {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .mfa-intro-icon {
+            width: 42px;
+            height: 42px;
+            margin: 0 auto 10px;
+            display: grid;
+            place-items: center;
+            border: 1px solid #bae6fd;
+            border-radius: 50%;
+            background: #f0f9ff;
+            color: #0284c7;
+        }
+        .mfa-intro h2 {
+            margin: 0;
+            color: #18181b;
+            font-size: 20px;
+            font-weight: 750;
+        }
+        .mfa-intro p {
+            margin: 6px auto 0;
+            max-width: 390px;
+            color: #52525b;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        #mfaStatus {
+            margin-bottom: 14px;
+            color: #52525b;
+            font-size: 12px;
+            text-align: center;
+        }
+        .mfa-panel-title {
+            margin: 0;
+            color: #18181b;
+            font-size: 17px;
+            font-weight: 750;
+        }
+        .mfa-panel-copy {
+            margin: 6px auto 16px;
+            max-width: 400px;
+            color: #52525b;
+            font-size: 13px;
+            line-height: 1.5;
         }
         .step-badge {
             display: inline-flex;
@@ -46,18 +128,18 @@
             gap: 12px;
             align-items: flex-start;
             padding: 10px 14px;
-            background: var(--panel-raised);
-            border: 1px solid var(--border);
+            background: #fafafa;
+            border: 1px solid #e4e4e7;
             border-radius: 8px;
         }
         .step-text {
             font-size: 13px;
             line-height: 1.4;
-            color: var(--text);
+            color: #18181b;
         }
         .step-text small {
             display: block;
-            color: var(--muted);
+            color: #71717a;
             font-size: 11px;
             margin-top: 2px;
         }
@@ -69,10 +151,10 @@
             font-size: 24px;
             font-weight: 700;
             font-family: "JetBrains Mono", monospace;
-            border: 2px solid var(--border-strong);
+            border: 2px solid #d4d4d8;
             border-radius: 8px;
-            background: var(--panel-raised);
-            color: var(--text);
+            background: #ffffff;
+            color: #18181b;
             outline: none;
             transition: border-color 150ms ease, box-shadow 150ms ease;
         }
@@ -86,8 +168,8 @@
             justify-content: space-between;
             gap: 8px;
             padding: 8px 12px;
-            background: var(--panel-raised);
-            border: 1px dashed var(--border-strong);
+            background: #fafafa;
+            border: 1px dashed #a1a1aa;
             border-radius: 6px;
             font-family: "JetBrains Mono", monospace;
             font-size: 12px;
@@ -96,8 +178,8 @@
         }
         .copy-btn {
             background: transparent;
-            border: 1px solid var(--border);
-            color: var(--muted);
+            border: 1px solid #d4d4d8;
+            color: #52525b;
             padding: 4px 8px;
             border-radius: 4px;
             font-size: 11px;
@@ -109,9 +191,9 @@
             transition: all 150ms ease;
         }
         .copy-btn:hover {
-            color: var(--text);
-            border-color: var(--border-strong);
-            background: var(--panel);
+            color: #18181b;
+            border-color: #a1a1aa;
+            background: #f4f4f5;
         }
         .app-pill {
             display: inline-flex;
@@ -119,47 +201,81 @@
             gap: 6px;
             padding: 4px 10px;
             border-radius: 999px;
-            background: var(--panel-raised);
-            border: 1px solid var(--border);
+            background: #f4f4f5;
+            border: 1px solid #e4e4e7;
             font-size: 11px;
-            color: var(--muted);
+            color: #52525b;
+        }
+        .authenticator-apps {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 8px;
+        }
+        .mfa-primary-action {
+            width: 100%;
+            min-height: 44px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            border: 1px solid #0284c7;
+            border-radius: 5px;
+            background: #0284c7;
+            color: #ffffff;
+            font-size: 13px;
+            font-weight: 750;
+        }
+        .mfa-primary-action:hover {
+            background: #0369a1;
+        }
+        .mfa-primary-action:disabled {
+            cursor: wait;
+            opacity: 0.6;
+        }
+        @media (max-width: 600px) {
+            .mfa-page-container { padding: 14px; }
+            .mfa-card { padding: 20px; }
+            .mfa-brand { justify-content: flex-start; }
+            .mfa-brand img { width: 112px; height: 34px; }
+            .mfa-brand h1 { font-size: 16px; }
         }
     </style>
 </head>
-<body class="bg-zinc-950 text-zinc-100 antialiased h-screen overflow-y-auto">
+<body>
     <div class="mfa-page-container">
-        <!-- App Header matching Dashboard/Admin -->
-        <header class="app-header">
-            <div class="flex min-w-0 items-center gap-3">
-                <a href="/" aria-label="Return to operations dashboard">
-                    <img class="brand-logo" src="./assets/CWBLogo.png" alt="The Center for Wooden Boats">
-                </a>
-                <div class="min-w-0">
-                    <h1 class="brand-title truncate text-sm font-semibold uppercase tracking-wide sm:text-base">Security Verification</h1>
-                    <p class="truncate text-[11px] text-zinc-400">Two-Factor Authentication Setup</p>
+        <main class="mfa-shell">
+            <div class="mfa-brand">
+                <img src="./assets/CWBLogo.png" alt="The Center for Wooden Boats">
+                <div>
+                    <h1>Secure your CWB account</h1>
+                    <p>Two-factor authentication setup</p>
                 </div>
             </div>
-            <div class="flex items-center gap-2">
-                <div id="mfaConnection" class="connection-pill" role="status"><span class="status-dot"></span><span class="hidden sm:inline">Checking</span></div>
-                <a href="/" class="header-command"><i data-lucide="map" class="h-4 w-4"></i><span class="hidden sm:inline">Operations</span></a>
-            </div>
-        </header>
-
-        <main class="flex-1 flex items-center justify-center p-4 sm:p-6 my-auto">
-            <div class="mfa-card p-6 sm:p-8">
-                <!-- Header Icon & Title -->
-                <div class="text-center mb-6">
-                    <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-sky-500/10 text-sky-400 border border-sky-500/20 mb-3">
+            <section class="mfa-card" aria-labelledby="mfaHeading">
+                <div class="mfa-intro">
+                    <div class="mfa-intro-icon">
                         <i data-lucide="shield-check" class="h-7 w-7"></i>
                     </div>
-                    <h1 class="text-xl sm:text-2xl font-bold tracking-tight text-white">Two-Factor Authentication</h1>
-                    <p class="text-xs sm:text-sm text-zinc-400 mt-1 max-w-sm mx-auto">
-                        Protect CWB operational data and renter information with time-based verification.
-                    </p>
+                    <h2 id="mfaHeading">Set up your authenticator</h2>
+                    <p>Use Google Authenticator, Microsoft Authenticator, 1Password, Authy, or another TOTP app.</p>
                 </div>
 
-                <!-- Status alert -->
-                <div id="mfaStatus" class="mb-4 text-xs sm:text-sm text-center text-zinc-400">Checking account status…</div>
+                <div id="mfaStatus" role="status" aria-live="polite">Checking account status...</div>
+
+                <div id="invitePanel" class="hidden text-center">
+                    <h2 class="mfa-panel-title">Accept your CWB invitation</h2>
+                    <p class="mfa-panel-copy">Enter the email address where this invitation was delivered. The address must match the CWB administrator's invitation.</p>
+                    <form id="inviteForm" class="space-y-3">
+                        <label for="inviteEmail" class="block text-left text-xs font-semibold text-zinc-700">Invited email address</label>
+                        <input id="inviteEmail" class="w-full rounded-md border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-900" type="email" autocomplete="email" required>
+                        <button id="acceptInviteButton" class="mfa-primary-action" type="submit">
+                            <i data-lucide="mail-check" class="h-4 w-4"></i>
+                            <span>Verify invitation</span>
+                        </button>
+                    </form>
+                    <p id="inviteMessage" class="mt-2 text-xs text-red-600" role="alert"></p>
+                </div>
 
                 <!-- 1. ENROLL PANEL -->
                 <div id="enrollPanel" class="hidden space-y-6">
@@ -169,7 +285,7 @@
                         <div class="step-text flex-1">
                             <strong>Open your Authenticator App</strong>
                             <small>Compatible with standard TOTP apps:</small>
-                            <div class="flex flex-wrap gap-1.5 mt-2">
+                            <div class="authenticator-apps">
                                 <span class="app-pill"><i data-lucide="smartphone" class="h-3 w-3"></i> Google Authenticator</span>
                                 <span class="app-pill"><i data-lucide="shield" class="h-3 w-3"></i> Microsoft Auth</span>
                                 <span class="app-pill"><i data-lucide="key" class="h-3 w-3"></i> 1Password</span>
@@ -183,14 +299,14 @@
                         <span class="step-badge">2</span>
                         <div class="step-text flex-1">
                             <strong>Scan the QR code</strong>
-                            <small>In your authenticator, choose <em>Add Account</em> or <em>Scan QR</em>.</small>
+                            <small>Always scan the QR shown here. A CWB entry from an earlier setup attempt uses a different key and cannot verify this enrollment.</small>
                             
-                            <div class="flex flex-col sm:flex-row items-center gap-4 mt-3 p-3 bg-zinc-900 border border-zinc-800 rounded-lg">
+                            <div class="flex flex-col sm:flex-row items-center gap-4 mt-3 p-3 bg-white border border-zinc-200 rounded-lg">
                                 <div id="qrBox" class="p-2 bg-white rounded-md flex-shrink-0">
                                     <!-- QR rendered here -->
                                 </div>
                                 <div class="min-w-0 flex-1 space-y-2 text-left">
-                                    <span class="text-[11px] font-semibold uppercase text-zinc-400 tracking-wider">Cannot scan? Manual setup key:</span>
+                                    <span class="text-[11px] font-semibold uppercase text-zinc-600 tracking-wider">Cannot scan? Manual setup key:</span>
                                     <div class="secret-box">
                                         <code id="secretKey" class="truncate"></code>
                                         <button id="copySecretBtn" class="copy-btn" type="button" title="Copy key">
@@ -198,8 +314,13 @@
                                             <span>Copy</span>
                                         </button>
                                     </div>
-                                    <span class="text-[11px] text-zinc-500 block">Account: <span id="mfaAccountEmail" class="text-zinc-300"></span></span>
+                                    <span class="text-[11px] text-zinc-500 block">Account: <span id="mfaAccountEmail" class="text-zinc-700"></span></span>
+                                    <span class="text-[11px] text-zinc-500 block">Use the authenticator entry labeled: <strong id="mfaSetupLabel" class="text-zinc-800"></strong></span>
                                 </div>
+                            </div>
+                            <div class="mt-3 flex gap-2 rounded-md border border-amber-300 bg-amber-50 p-2.5 text-left text-[11px] leading-4 text-amber-900">
+                                <i data-lucide="triangle-alert" class="mt-0.5 h-3.5 w-3.5 shrink-0"></i>
+                                <span>Already see CWB Operations in your app? Remove that old entry, then scan this QR to create the entry whose setup label appears above.</span>
                             </div>
                         </div>
                     </div>
@@ -233,8 +354,8 @@
                         <i data-lucide="badge-check" class="h-8 w-8"></i>
                     </div>
                     <div>
-                        <h2 class="text-lg font-bold text-white">Two-Factor Authentication Active</h2>
-                        <p class="text-xs sm:text-sm text-zinc-400 mt-1 max-w-sm mx-auto">
+                        <h2 class="text-lg font-bold text-zinc-900">Two-Factor Authentication Active</h2>
+                        <p class="text-xs sm:text-sm text-zinc-600 mt-1 max-w-sm mx-auto">
                             Your account is fully secured with TOTP verification.
                         </p>
                     </div>
@@ -256,8 +377,8 @@
                         <i data-lucide="lock" class="h-6 w-6"></i>
                     </div>
                     <div>
-                        <h2 class="text-lg font-semibold text-white">Sign-in Required</h2>
-                        <p class="text-xs sm:text-sm text-zinc-400 mt-1">Please sign in with your CWB account before setting up two-factor authentication.</p>
+                        <h2 class="text-lg font-semibold text-zinc-900">Sign-in Required</h2>
+                        <p class="text-xs sm:text-sm text-zinc-600 mt-1">Please sign in with your CWB account before setting up two-factor authentication.</p>
                     </div>
                     <div>
                         <a href="/" class="primary-button py-2.5 px-6 text-sm inline-flex">
@@ -268,31 +389,17 @@
                 </div>
 
                 <!-- 4. REAUTHENTICATION REQUIRED PANEL -->
-                <div id="reauthPanel" class="hidden text-center py-6 space-y-4">
-                    <div class="w-14 h-14 rounded-full bg-sky-500/10 text-sky-400 border border-sky-500/20 mx-auto flex items-center justify-center">
-                        <i data-lucide="fingerprint" class="h-7 w-7"></i>
-                    </div>
-                    <div>
-                        <h2 class="text-lg font-semibold text-white">Security Confirmation</h2>
-                        <p class="text-xs sm:text-sm text-zinc-400 mt-1 max-w-sm mx-auto">
-                            To ensure account security, please re-confirm your identity with Google before enrolling a new authenticator.
-                        </p>
-                    </div>
-                    <div>
-                        <button id="reauthButton" class="primary-button py-2.5 px-6 text-sm">
-                            <i data-lucide="check" class="h-4 w-4"></i>
-                            <span>Confirm Identity</span>
-                        </button>
-                        <p id="reauthMessage" class="mt-2 text-xs text-red-400"></p>
-                    </div>
+                <div id="reauthPanel" class="hidden text-center">
+                    <h2 class="mfa-panel-title">Confirm your Google account</h2>
+                    <p class="mfa-panel-copy">Before we show your QR code, confirm the Google account you just used to sign in.</p>
+                    <button id="reauthButton" class="mfa-primary-action" type="button">
+                        <i data-lucide="log-in" class="h-4 w-4"></i>
+                        <span>Continue with Google</span>
+                    </button>
+                    <p id="reauthMessage" class="mt-2 text-xs text-red-600" role="alert"></p>
                 </div>
-            </div>
+            </section>
         </main>
-
-        <footer class="status-bar flex justify-between px-4 py-2 border-t border-zinc-800 text-[11px] text-zinc-500">
-            <span>The Center for Wooden Boats · Fleet Operations</span>
-            <span>Identity & Access Management</span>
-        </footer>
     </div>
 
     <script src="./vendor/qrcode/qrcode.js"></script>

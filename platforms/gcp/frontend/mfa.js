@@ -1,33 +1,46 @@
-import { getFirebase, beginTotpEnrollment, completeTotpEnrollment, reauthenticate, isConfigValid, revealProtectedPage } from "./auth-guard.js";
+import { getFirebase, beginTotpEnrollment, completeTotpEnrollment, reauthenticate, signOut, isConfigValid, revealProtectedPage } from "./auth-guard.js";
 
 const statusEl = document.getElementById("mfaStatus");
-const mfaConnection = document.getElementById("mfaConnection");
 const enrollPanel = document.getElementById("enrollPanel");
 const donePanel = document.getElementById("donePanel");
 const signinPanel = document.getElementById("signinPanel");
 const reauthPanel = document.getElementById("reauthPanel");
+const invitePanel = document.getElementById("invitePanel");
+const inviteForm = document.getElementById("inviteForm");
+const inviteEmail = document.getElementById("inviteEmail");
+const acceptInviteButton = document.getElementById("acceptInviteButton");
+const inviteMessage = document.getElementById("inviteMessage");
 const reauthButton = document.getElementById("reauthButton");
 const reauthMessage = document.getElementById("reauthMessage");
 const qrBox = document.getElementById("qrBox");
 const secretKey = document.getElementById("secretKey");
 const copySecretBtn = document.getElementById("copySecretBtn");
 const mfaAccountEmail = document.getElementById("mfaAccountEmail");
+const mfaSetupLabel = document.getElementById("mfaSetupLabel");
 const codeInput = document.getElementById("totpCode");
 const verifyButton = document.getElementById("verifyButton");
 const messageEl = document.getElementById("enrollMessage");
 
 function setConnection(mode, label) {
-    if (!mfaConnection) return;
-    mfaConnection.className = `connection-pill ${mode}`;
-    mfaConnection.innerHTML = `<span class="status-dot"></span><span class="hidden sm:inline">${label}</span>`;
+    document.body.dataset.connection = mode;
+    document.title = `${label} - CWB`;
 }
 
 function show(panel) {
-    [enrollPanel, donePanel, signinPanel, reauthPanel].forEach(p => p?.classList.add("hidden"));
+    [enrollPanel, donePanel, signinPanel, reauthPanel, invitePanel].forEach(p => p?.classList.add("hidden"));
     panel?.classList.remove("hidden");
     if (window.lucide) {
         window.lucide.createIcons();
     }
+}
+
+function invitationToken() {
+    return new URLSearchParams(window.location.hash.slice(1)).get("invite") || "";
+}
+
+async function callFunction(name, data) {
+    const { functions, functionsModule } = await getFirebase();
+    return functionsModule.httpsCallable(functions, name)(data);
 }
 
 // Render the MFA seed entirely in-browser so it never reaches a QR service.
@@ -86,8 +99,9 @@ async function startEnrollment(user) {
     show(enrollPanel);
     
     try {
-        const { secret, qrUrl } = await beginTotpEnrollment(user, "CWB Operations");
+        const { secret, qrUrl, setupId } = await beginTotpEnrollment(user, "CWB Operations");
         secretKey.textContent = secret.secretKey;
+        mfaSetupLabel.textContent = `${user.email || user.uid} [setup ${setupId}]`;
         renderQr(qrUrl);
         codeInput.value = "";
         codeInput.focus();
@@ -107,24 +121,24 @@ async function startEnrollment(user) {
 
             try {
                 await completeTotpEnrollment(user, secret, code);
+                const token = invitationToken();
+                if (token) await callFunction("completeUserInvitation", { token });
                 // Mirror enrollment into the user's profile doc so admin views
                 // can show 2FA state without querying Firebase Auth.
                 try {
-                    const { db, firestoreModule } = await getFirebase();
-                    firestoreModule.setDoc(firestoreModule.doc(db, "users", user.uid), {
-                        email: user.email || "",
-                        mfaEnrolled: true
-                    }, { merge: true }).catch((err) => console.warn("Could not mirror 2FA state", err));
+                    await callFunction("recordMfaEnrollment", {});
                 } catch (err) {
                     console.warn("Could not mirror 2FA state", err);
                 }
-                statusEl.textContent = "";
+                statusEl.textContent = "2FA enabled. Sign in again to verify your authenticator.";
                 setConnection("live", "Enrolled");
-                show(donePanel);
+                await signOut();
+                window.location.replace("/");
+                return;
             } catch (error) {
                 console.error("TOTP enrollment failed", error);
                 messageEl.textContent = error.code === "auth/invalid-verification-code"
-                    ? "Invalid verification code. Check that your device clock is synchronized and try again."
+                    ? `That code does not match setup ${setupId}. In your authenticator, use the entry labeled [setup ${setupId}]. If it is missing, remove the older CWB entry and scan this QR again.`
                     : `Enrollment failed: ${error.message || "Unknown error"}`;
                 codeInput.select();
             } finally {
@@ -160,6 +174,27 @@ async function init() {
     }
 
     const { auth, authModule } = await getFirebase();
+    const token = invitationToken();
+    if (authModule.isSignInWithEmailLink(auth, window.location.href)) {
+        revealProtectedPage();
+        setConnection("", "Invitation verification");
+        show(invitePanel);
+        inviteForm.addEventListener("submit", async event => {
+            event.preventDefault();
+            inviteMessage.textContent = "";
+            acceptInviteButton.disabled = true;
+            try {
+                await authModule.signInWithEmailLink(auth, inviteEmail.value.trim(), window.location.href);
+                window.location.replace(`/mfa#invite=${encodeURIComponent(token)}`);
+            } catch (error) {
+                console.error("Invitation sign-in failed", error.code);
+                inviteMessage.textContent = "This invitation could not be verified. Confirm the invited email address or ask a CWB administrator for a new invitation.";
+            } finally {
+                acceptInviteButton.disabled = false;
+            }
+        });
+        return;
+    }
     authModule.onAuthStateChanged(auth, async (user) => {
         revealProtectedPage();
         if (!user) {
@@ -167,6 +202,18 @@ async function init() {
             setConnection("", "Signed out");
             show(signinPanel);
             return;
+        }
+
+        if (token) {
+            try {
+                await callFunction("acceptUserInvitation", { token });
+            } catch (error) {
+                console.error("Invitation acceptance failed", error.code);
+                statusEl.textContent = "This invitation is invalid, expired, already used, or does not match the signed-in account. Ask a CWB administrator for a new invitation.";
+                setConnection("error", "Invalid invitation");
+                show(signinPanel);
+                return;
+            }
         }
 
         const enrolled = authModule.multiFactor(user).enrolledFactors;
@@ -180,7 +227,7 @@ async function init() {
         reauthButton.onclick = async () => {
             reauthMessage.textContent = "";
             reauthButton.disabled = true;
-            reauthButton.innerHTML = `<i data-lucide="loader-2" class="h-4 w-4 animate-spin"></i><span>Confirming...</span>`;
+            reauthButton.innerHTML = `<i data-lucide="loader-2" class="h-4 w-4 animate-spin"></i><span>Opening Google...</span>`;
             if (window.lucide) window.lucide.createIcons();
 
             try {
@@ -192,7 +239,7 @@ async function init() {
                 }
             } finally {
                 reauthButton.disabled = false;
-                reauthButton.innerHTML = `<i data-lucide="check" class="h-4 w-4"></i><span>Confirm Identity</span>`;
+                reauthButton.innerHTML = `<i data-lucide="log-in" class="h-4 w-4"></i><span>Continue with Google</span>`;
                 if (window.lucide) window.lucide.createIcons();
             }
         };
