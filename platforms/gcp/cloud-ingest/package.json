@@ -21,6 +21,7 @@
     "firebase-functions": "^7.3.2",
     "gaxios": "^7.3.1",
     "google-auth-library": "^10.9.1",
+    "proxy-addr": "^2.0.8",
     "retry-request": "^8.0.4",
     "teeny-request": "^10.1.4",
     "uuid": "^11.0.0"

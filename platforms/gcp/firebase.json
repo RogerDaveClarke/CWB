@@ -11,19 +11,13 @@
       { "source": "/admin.html", "destination": "/admin", "type": 301 },
       { "source": "/history.html", "destination": "/history", "type": 301 },
       { "source": "/users.html", "destination": "/users", "type": 301 },
-      { "source": "/mfa.html", "destination": "/mfa", "type": 301 },
-      { "source": "/events-prototype.html", "destination": "/events", "type": 301 },
-      { "source": "/event-types.html", "destination": "/event-types", "type": 301 },
-      { "source": "/rental-simulation.html", "destination": "/rental-simulation", "type": 301 }
+      { "source": "/mfa.html", "destination": "/mfa", "type": 301 }
     ],
     "rewrites": [
       { "source": "/admin", "destination": "/admin.html" },
       { "source": "/history", "destination": "/history.html" },
       { "source": "/users", "destination": "/users.html" },
-      { "source": "/mfa", "destination": "/mfa.html" },
-      { "source": "/events", "destination": "/events-prototype.html" },
-      { "source": "/event-types", "destination": "/event-types.html" },
-      { "source": "/rental-simulation", "destination": "/rental-simulation.html" }
+      { "source": "/mfa", "destination": "/mfa.html" }
     ],
     "headers": [
       {

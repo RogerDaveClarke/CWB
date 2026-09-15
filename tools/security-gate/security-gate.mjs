@@ -208,9 +208,20 @@ const mfaSource = read('platforms/gcp/frontend/mfa.js');
 if (!mfaSource.includes('window.qrcode') || /qrserver\.com/.test(mfaSource)) {
   failures.push('MFA QR generation is not fully local.');
 }
-const simulationHtml = read('platforms/gcp/frontend/rental-simulation.html');
-if (/https:\/\/unpkg\.com/.test(simulationHtml)) failures.push('Rental simulation executes CDN assets.');
-if (/https:\/\/fonts\.(?:googleapis|gstatic)\.com/.test(simulationHtml)) failures.push('Rental simulation sends browser metadata to third-party font services.');
+for (const retiredArtifact of [
+  'platforms/gcp/frontend/rental-simulation.html',
+  'platforms/gcp/frontend/rental-simulation.js',
+  'platforms/gcp/frontend/rental-simulation.css',
+  'platforms/gcp/frontend/events-prototype.html',
+  'platforms/gcp/frontend/events-prototype.js',
+  'platforms/gcp/frontend/events-prototype.css',
+  'platforms/gcp/frontend/event-types.html'
+]) {
+  if (existsSync(join(ROOT, retiredArtifact))) failures.push(`Retired prototype artifact was restored: ${retiredArtifact}`);
+}
+for (const retiredRoute of ['/rental-simulation', '/events', '/event-types']) {
+  if (firebaseConfig.includes(`"source": "${retiredRoute}`)) failures.push(`Retired prototype route was restored: ${retiredRoute}`);
+}
 const usersSource = read('platforms/gcp/frontend/users.js');
 if (/sessionStorage\.(?:getItem|setItem)\([^)]*roster/i.test(usersSource)) {
   failures.push('Account roster PII is cached in sessionStorage.');

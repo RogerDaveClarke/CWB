@@ -63,6 +63,7 @@ Remediation and verification:
 - Replaced CDN scripts and styles with the existing same-origin vendored assets.
 - Removed `unpkg.com` from CSP and removed Google Fonts requests from the simulation.
 - The security gate now rejects those third-party origins.
+- The simulation and event prototypes were retired from Firebase Hosting on September 15, 2026; release gates reject restoration of their files or routes.
 
 ### PT-004: Volunteer Access To Sensitive Boat Documents
 
@@ -96,6 +97,7 @@ Remediation and verification:
 
 - Escaped renter names, phone values, activity messages, toast text, and displayed boat text before HTML rendering.
 - Focused Snyk Code scan reported no remaining finding.
+- The simulation was subsequently removed from the deployed application, eliminating this input surface.
 
 ### PT-007: Internal Gateway Error Disclosure
 
@@ -171,7 +173,7 @@ Internal links exposed static implementation filenames such as `/history.html` a
 
 Remediation and verification:
 
-- All user-facing navigation uses canonical routes: `/`, `/history`, `/admin`, `/users`, `/mfa`, and `/rental-simulation`.
+- All remaining user-facing navigation uses canonical routes: `/`, `/history`, `/admin`, `/users`, and `/mfa`.
 - Firebase Hosting internally rewrites clean routes to static files and permanently redirects legacy `.html` URLs to canonical paths.
 - The penetration gate rejects user-facing `.html` links and missing canonical redirects.
 
@@ -206,7 +208,7 @@ The instrumented browser was rejected by reCAPTCHA Enterprise and blocked popup 
 
 ## Static Analysis Disposition
 
-- Focused Snyk Code scans of MFA, simulation, account administration, and boat configuration found no issues after remediation.
+- Focused Snyk Code scans of MFA, the since-retired simulation, account administration, and boat configuration found no issues after remediation.
 - A broad frontend scan identified DOM-XSS alerts around Fleet Administration rendering. Dynamic options, rows, controls, and schedule inputs were rebuilt with DOM APIs, `textContent`, and element properties rather than `innerHTML`; focused rescanning then reported zero findings.
 - The Firebase web API key is intentionally public client configuration, not an authorization secret. Access control remains in Auth, App Check, callable guards, and Firestore Rules. Secret scanning remains strict for actual credentials.
 - VS Code continued to display a stale exception-to-DOM warning at a `document.createElement` line after exception data and the HTML sink were removed. Direct Snyk scan and source inspection found no source-to-sink flow.
