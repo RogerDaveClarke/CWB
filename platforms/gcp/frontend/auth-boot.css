@@ -5,3 +5,7 @@ html.auth-pending body {
 html.auth-pending body > :not(#cwbAuthModalOverlay) {
     visibility: hidden !important;
 }
+
+[data-admin-navigation][hidden] {
+    display: none !important;
+}

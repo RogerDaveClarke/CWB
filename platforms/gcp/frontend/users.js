@@ -1,5 +1,5 @@
 import { getFirebase, initAuthGuard, showAuthModal, signOut, isConfigValid } from "./auth-guard.js";
-import { initHeaderControls, setHeaderUser } from "./header-nav.js";
+import { initHeaderControls, setAdminNavigation, setHeaderUser } from "./header-nav.js";
 
 const connectionEl = document.getElementById("usersConnection");
 const adminPanel = document.getElementById("adminPanel");
@@ -698,13 +698,14 @@ async function init() {
     wireEventListeners();
 
     await initAuthGuard({ requireAdmin: true, requireMfa: true }, {
-        onReady: ({ user }) => {
+        onReady: ({ user, claims }) => {
             state.currentUser = user;
             setConnection("live", "Admin access");
             adminPanel.classList.remove("hidden");
             deniedPanel.classList.add("hidden");
 
             setHeaderUser(authActionButton, user);
+            setAdminNavigation(claims.isAdmin);
 
             loadUsersFast();
             loadUsers();
@@ -727,6 +728,7 @@ async function init() {
             }
 
             setHeaderUser(authActionButton, user);
+            setAdminNavigation(false);
         },
         onSignedOut: () => {
             state.currentUser = null;
@@ -738,6 +740,7 @@ async function init() {
             setConnection("", "Sign in required");
 
             setHeaderUser(authActionButton, null);
+            setAdminNavigation(false);
 
             showAuthModal("signIn");
         }

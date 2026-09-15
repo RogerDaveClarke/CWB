@@ -1,6 +1,6 @@
 import { firebaseConfig } from "./firebase-config.js";
 import { getFirebase, initAuthGuard, signOut, showAuthModal, isConfigValid } from "./auth-guard.js";
-import { initHeaderControls, setHeaderUser } from "./header-nav.js";
+import { initHeaderControls, setAdminNavigation, setHeaderUser } from "./header-nav.js";
 import { collection, deleteField, doc, limit, onSnapshot, orderBy, query, serverTimestamp, updateDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 const DOCK = { latitude: 47.62795, longitude: -122.33645 };
@@ -452,6 +452,7 @@ async function startFirebase() {
 
                 elements.signIn.classList.remove("hidden");
                 setHeaderUser(elements.signIn, user);
+                setAdminNavigation(claims.isAdmin);
 
                 onSnapshot(collection(db, "boats"), snapshot => {
                     state.demoMode = false;
@@ -480,6 +481,7 @@ async function startFirebase() {
             onDenied: (reason) => {
                 state.user = null;
                 state.boats.clear();
+                setAdminNavigation(false);
                 setConnection("error", "Access restricted");
                 elements.tableBody.innerHTML = `<tr><td colspan="13" class="empty-cell">Sign in required.</td></tr>`;
             },
@@ -487,6 +489,7 @@ async function startFirebase() {
                 state.user = null;
                 state.boats.clear();
                 setHeaderUser(elements.signIn, null);
+                setAdminNavigation(false);
                 setConnection("", "Sign in required");
                 elements.tableBody.innerHTML = `<tr><td colspan="13" class="empty-cell">Sign in required to view operations.</td></tr>`;
             }

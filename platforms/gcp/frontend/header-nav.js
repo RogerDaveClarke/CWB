@@ -19,6 +19,12 @@ export function setHeaderUser(button, user) {
     if (window.lucide) window.lucide.createIcons();
 }
 
+export function setAdminNavigation(isAdmin) {
+    document.querySelectorAll("[data-admin-navigation]").forEach(link => {
+        link.hidden = !isAdmin;
+    });
+}
+
 export function initHeaderControls() {
     const clock = document.getElementById("headerClock");
     if (clock) {

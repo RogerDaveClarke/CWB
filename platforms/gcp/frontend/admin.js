@@ -1,6 +1,6 @@
 import { firebaseConfig } from "./firebase-config.js";
 import { initAuthGuard, signOut, showAuthModal, isConfigValid, getFirebase } from "./auth-guard.js";
-import { initHeaderControls, setHeaderUser } from "./header-nav.js";
+import { initHeaderControls, setAdminNavigation, setHeaderUser } from "./header-nav.js";
 import { collection, deleteDoc, doc, getDocs, onSnapshot, serverTimestamp, setDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 const DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
@@ -580,6 +580,7 @@ function startDemo() {
 function updateAuth(user, isAdmin) {
     state.user = user;
     state.isAdmin = isAdmin;
+    setAdminNavigation(isAdmin);
     if (user) {
         setHeaderUser(elements.signIn, user);
         setConnection(isAdmin ? "live" : "error", isAdmin ? "Admin access" : "Read only");

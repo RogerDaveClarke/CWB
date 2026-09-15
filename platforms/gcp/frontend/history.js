@@ -1,6 +1,6 @@
 import { firebaseConfig } from "./firebase-config.js";
 import { initAuthGuard, showAuthModal, signOut, isConfigValid } from "./auth-guard.js";
-import { initHeaderControls, setHeaderUser } from "./header-nav.js";
+import { initHeaderControls, setAdminNavigation, setHeaderUser } from "./header-nav.js";
 import { collection, limit, onSnapshot, orderBy, query } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 const DEMO_RENTAL_HISTORY_KEY = "cwbDemoRentalHistory";
@@ -127,9 +127,10 @@ async function startFirebase() {
     }
     try {
         await initAuthGuard({ roles: ["admin", "manager", "staff"], functionLevels: ["operations", "administration"] }, {
-            onReady: ({ user, db }) => {
+            onReady: ({ user, claims, db }) => {
                 state.user = user;
                 setHeaderUser(elements.signIn, user);
+                setAdminNavigation(claims.isAdmin);
                 const historyQuery = query(collection(db, "rental_history"), orderBy("checked_in_at", "desc"), limit(500));
                 onSnapshot(historyQuery, snapshot => {
                     if (snapshot.empty) {
@@ -150,12 +151,14 @@ async function startFirebase() {
             onDenied: (reason, user) => {
                 state.user = user;
                 setHeaderUser(elements.signIn, user);
+                setAdminNavigation(false);
                 setConnection("error", "Access restricted");
                 elements.tableBody.innerHTML = `<tr><td colspan="8" class="empty-cell">Access restricted. Sign in with an authorized account.</td></tr>`;
             },
             onSignedOut: () => {
                 state.user = null;
                 setHeaderUser(elements.signIn, null);
+                setAdminNavigation(false);
                 setConnection("", "Sign in required");
                 elements.tableBody.innerHTML = `<tr><td colspan="8" class="empty-cell">Sign in required to view rental history.</td></tr>`;
             }
