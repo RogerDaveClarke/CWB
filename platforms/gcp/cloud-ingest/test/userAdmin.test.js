@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { randomBytes } = require('node:crypto');
 const { buildIdentityUpdate, hashInvitationValue, assertUsableInvitation, assertInvitationIdentity, validateLifecycleRequest, sendLifecycleEmail, encryptLifecycleMessage, decryptLifecycleMessage, lifecycleJobExpired } = require('../userAdmin');
 
 test('identity update normalizes a corrected email and resets verification', () => {
@@ -70,26 +71,30 @@ test('suspension requires a bounded explanation', () => {
   assert.throws(() => validateLifecycleRequest({ confirmationEmail: user.email, reason: 'x'.repeat(1001) }, user, true), error => error.code === 'invalid-argument');
 });
 
-test('lifecycle email uses Resend without placing content in the URL', async () => {
-  const originalKey = process.env.RESEND_API_KEY;
-  const originalFrom = process.env.RESEND_FROM_EMAIL;
-  process.env.RESEND_API_KEY = 'test-key';
-  process.env.RESEND_FROM_EMAIL = 'CWB <accounts@example.org>';
-  let request;
+test('lifecycle email uses authenticated Gmail SMTP without exposing credentials', async () => {
+  const originalEmail = process.env.GMAIL_SENDER_EMAIL;
+  const originalPassword = process.env.GMAIL_APP_PASSWORD;
+  const appPassword = randomBytes(16).toString('hex');
+  process.env.GMAIL_SENDER_EMAIL = 'poc.sender@gmail.com';
+  process.env.GMAIL_APP_PASSWORD = appPassword;
+  let message;
   try {
-    await sendLifecycleEmail({ to: 'person@example.org', subject: 'Notice', text: 'Account notice.' }, async (url, options) => {
-      request = { url, options };
-      return { ok: true };
+    await sendLifecycleEmail({ to: 'person@example.org', subject: 'Notice', text: 'Account notice.' }, {
+      async sendMail(options) {
+        message = options;
+        return { accepted: [options.to] };
+      }
     }, 'job-1');
   } finally {
-    process.env.RESEND_API_KEY = originalKey;
-    process.env.RESEND_FROM_EMAIL = originalFrom;
+    process.env.GMAIL_SENDER_EMAIL = originalEmail;
+    process.env.GMAIL_APP_PASSWORD = originalPassword;
   }
-  assert.equal(request.url, 'https://api.resend.com/emails');
-  assert.equal(request.options.method, 'POST');
-  assert.equal(JSON.parse(request.options.body).to[0], 'person@example.org');
-  assert.equal(request.options.headers['Idempotency-Key'], 'job-1');
-  assert.equal(request.url.includes('person@example.org'), false);
+  assert.equal(message.from, 'poc.sender@gmail.com');
+  assert.equal(message.to, 'person@example.org');
+  assert.equal(message.subject, 'Notice');
+  assert.equal(message.text, 'Account notice.');
+  assert.equal(message.headers['X-CWB-Lifecycle-Job'], 'job-1');
+  assert.equal(JSON.stringify(message).includes(appPassword), false);
 });
 
 test('lifecycle notification content is encrypted at rest', () => {

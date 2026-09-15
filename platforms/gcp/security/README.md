@@ -18,7 +18,7 @@ Project: `cwb-boat-operations-c50dd`; primary region: `us-west1`.
 
 1. Run both gates, Cloud Function tests, and Firestore emulator tests.
 2. Add Secret Manager versions interactively; never pass values on a command line or through chat.
-	Account lifecycle email requires `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, and `LIFECYCLE_NOTIFICATION_KEY`; the sender must be a Resend-verified address or domain. The notification key must be a base64-encoded 32-byte random value and must be retained while lifecycle jobs are pending.
+	Account lifecycle email requires `GMAIL_SENDER_EMAIL`, `GMAIL_APP_PASSWORD`, and `LIFECYCLE_NOTIFICATION_KEY`. Use a dedicated Gmail mailbox with 2-Step Verification and an App Password; no owned domain or paid email provider is required for the POC. The notification key must be a base64-encoded 32-byte random value and must be retained while lifecycle jobs are pending.
 3. Deploy hosting first so browsers begin sending App Check tokens.
 4. Review App Check metrics, then deploy callable enforcement and dedicated runtime identities.
 5. Verify runtime identities, secret bindings, scheduled purge, security headers, and alert delivery.

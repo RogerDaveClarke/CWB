@@ -8,6 +8,7 @@ const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { defineSecret } = require('firebase-functions/params');
 const { createCipheriv, createDecipheriv, createHash, randomBytes } = require('node:crypto');
+const nodemailer = require('nodemailer');
 const { requireAuthenticatedUser, requireMfaAdmin, requireMfaOperations } = require('./authGuards');
 const { logSecurityEvent, pseudonymousId } = require('./securityLog');
 
@@ -19,8 +20,8 @@ const db = getFirestore();
 const ROLES = ['admin', 'manager', 'staff', 'volunteer'];
 const FUNCTION_LEVELS = ['operations', 'administration'];
 
-const RESEND_API_KEY = defineSecret('RESEND_API_KEY');
-const RESEND_FROM_EMAIL = defineSecret('RESEND_FROM_EMAIL');
+const GMAIL_SENDER_EMAIL = defineSecret('GMAIL_SENDER_EMAIL');
+const GMAIL_APP_PASSWORD = defineSecret('GMAIL_APP_PASSWORD');
 const LIFECYCLE_NOTIFICATION_KEY = defineSecret('LIFECYCLE_NOTIFICATION_KEY');
 const CALLABLE_OPTIONS = {
   enforceAppCheck: true,
@@ -28,7 +29,7 @@ const CALLABLE_OPTIONS = {
 };
 const LIFECYCLE_CALLABLE_OPTIONS = {
   ...CALLABLE_OPTIONS,
-  secrets: [RESEND_API_KEY, RESEND_FROM_EMAIL, LIFECYCLE_NOTIFICATION_KEY]
+  secrets: [GMAIL_SENDER_EMAIL, GMAIL_APP_PASSWORD, LIFECYCLE_NOTIFICATION_KEY]
 };
 const SESSION_EXIT_REASONS = new Set(['session-revoked', 'session-unverifiable', 'role-required', 'function-required', 'admin-required']);
 const INVITATION_TTL_MS = 24 * 60 * 60 * 1000;
@@ -90,24 +91,27 @@ function lifecycleJobExpired(job, now = Date.now()) {
   return (job.expiresAt?.toMillis?.() || 0) <= now;
 }
 
-async function sendLifecycleEmail({ to, subject, text }, fetchImpl = fetch, idempotencyKey = '') {
-  const apiKey = RESEND_API_KEY.value();
-  const from = RESEND_FROM_EMAIL.value();
-  if (!apiKey || !from) throw new Error('Account notification email is not configured.');
+async function sendLifecycleEmail({ to, subject, text }, transport, lifecycleJobId = '') {
+  const from = GMAIL_SENDER_EMAIL.value();
+  const appPassword = GMAIL_APP_PASSWORD.value();
+  if (!from || !appPassword) throw new Error('Account notification email is not configured.');
+  const mailTransport = transport || nodemailer.createTransport({
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true,
+    auth: { user: from, pass: appPassword }
+  });
   let lastError;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      const response = await fetchImpl('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-          ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
-        },
-        body: JSON.stringify({ from, to: [to], subject, text })
+      await mailTransport.sendMail({
+        from,
+        to,
+        subject,
+        text,
+        headers: lifecycleJobId ? { 'X-CWB-Lifecycle-Job': lifecycleJobId } : undefined
       });
-      if (response.ok) return true;
-      lastError = new Error(`Email provider returned status ${response.status}.`);
+      return true;
     } catch (error) {
       lastError = error;
     }
@@ -205,7 +209,7 @@ async function processQueuedLifecycleJob(reference) {
       await reference.delete();
       return { operationCompleted, notificationSent: false, expired: true };
     }
-    await sendLifecycleEmail(payload.message, fetch, `cwb-lifecycle-${reference.id}`);
+    await sendLifecycleEmail(payload.message, undefined, `cwb-lifecycle-${reference.id}`);
     await reference.delete();
     return { operationCompleted: true, notificationSent: true };
   } catch {
@@ -612,7 +616,7 @@ exports.retryLifecycleNotifications = onSchedule({
   timeoutSeconds: 300,
   maxInstances: 1,
   serviceAccount: 'cwb-user-admin@cwb-boat-operations-c50dd.iam.gserviceaccount.com',
-  secrets: [RESEND_API_KEY, RESEND_FROM_EMAIL, LIFECYCLE_NOTIFICATION_KEY]
+  secrets: [GMAIL_SENDER_EMAIL, GMAIL_APP_PASSWORD, LIFECYCLE_NOTIFICATION_KEY]
 }, async () => {
   const outbox = db.collection('lifecycle_notification_outbox');
   const expiredSnapshot = await outbox

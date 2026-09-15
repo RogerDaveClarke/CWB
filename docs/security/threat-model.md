@@ -19,7 +19,7 @@
 1. Tracker to private ChirpStack uses LoRaWAN security and is deferred until hardware exists.
 2. ChirpStack to `telemetryIngest` crosses the public internet and uses a Secret Manager credential, request constraints, replay receipts, and bounded retention.
 3. Browser to Firebase crosses an untrusted client boundary and requires Firebase Auth, role checks, TOTP for mutation, App Check, and Firestore Rules.
-4. Invitation and lifecycle email crosses the Firebase/Resend boundary. Role activation requires an administrator invitation, verified matching email, UID binding, and TOTP enrollment; Resend credentials and the lifecycle encryption key remain in Secret Manager. Notification content is encrypted at rest while queued for bounded retry.
+4. Invitation and lifecycle email crosses the Firebase/Gmail SMTP boundary. Role activation requires an administrator invitation, verified matching email, UID binding, and TOTP enrollment; the dedicated Gmail address, app password, and lifecycle encryption key remain in Secret Manager. Notification content is encrypted at rest while queued for bounded retry.
 5. Cloud Functions use the Admin SDK and therefore bypass Firestore Rules; privileged callables require current token claims to agree with the active live profile and Auth record.
 6. GitHub Actions and local hooks are software-supply-chain boundaries. CI uses least permissions, immutable action revisions, audits, CodeQL, secret scanning, and SBOM evidence.
 

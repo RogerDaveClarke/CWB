@@ -5,7 +5,7 @@
 //   npm run deploy -- --all         (deploys hosting + firestore + cloud functions)
 
 import { execSync } from "node:child_process";
-import { writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { loadEnv } from "./load-env.mjs";
@@ -66,11 +66,13 @@ export const firebaseConfig = {
 `;
 
 const configPath = join(gcpDir, "frontend", "firebase-config.js");
+const trackedConfigContent = readFileSync(configPath, "utf8");
 writeFileSync(configPath, configContent, "utf8");
 console.log(`   Updated ${configPath}`);
 
 console.log("4. Deploying to Firebase...");
 const targets = deployFunctions ? "hosting,firestore,functions" : "hosting,firestore";
+let deploymentFailed = false;
 try {
     const deployCmd = `npx --yes firebase-tools@15.30.0 deploy --only ${targets} --force`;
     console.log(`   Running: ${deployCmd}`);
@@ -78,5 +80,10 @@ try {
     console.log("\nDeployment completed successfully!");
 } catch (error) {
     console.error("\nFirebase deployment failed.");
-    process.exit(1);
+    deploymentFailed = true;
+} finally {
+    writeFileSync(configPath, trackedConfigContent, "utf8");
+    console.log("   Restored tracked Firebase placeholder configuration.");
 }
+
+if (deploymentFailed) process.exit(1);
