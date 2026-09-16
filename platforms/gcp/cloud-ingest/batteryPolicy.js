@@ -22,8 +22,9 @@ function timestampMillis(value) {
   return Number.NaN;
 }
 
-function checkoutBatteryDecision({ millivolts, readingTimestamp, now = Date.now(), serviceStatus, role, isAdmin = false, overrideReason = '' }) {
+function checkoutBatteryDecision({ millivolts, readingTimestamp, now = Date.now(), monitoringEnabled, serviceStatus, role, isAdmin = false, overrideReason = '' }) {
   const health = batteryHealth(millivolts);
+  if (monitoringEnabled === false) return { allowed: true, health, override: false };
   if (serviceStatus !== 'ready') return { allowed: false, health, reason: serviceStatus === 'charging' ? 'battery-charging' : serviceStatus === 'verification' ? 'battery-verification' : 'battery-service-unverified' };
   if (health === 'unknown') return { allowed: false, health, reason: 'battery-unverified' };
   const readingAt = timestampMillis(readingTimestamp);

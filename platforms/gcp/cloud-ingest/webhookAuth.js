@@ -70,10 +70,30 @@ function resetRateLimits() {
   requestWindows.clear();
 }
 
+function normalizeDeviceId(value) {
+  return typeof value === 'string' && /^[0-9a-f]{16}$/i.test(value) ? value.toLowerCase() : null;
+}
+
+function buildIngestEventId({ boatId, eventType, frameCounter, payload, deduplicationId }) {
+  const hash = createHash('sha256')
+    .update(boatId)
+    .update('\0')
+    .update(eventType || 'up')
+    .update('\0');
+  if (deduplicationId) {
+    hash.update('deduplication-id\0').update(String(deduplicationId));
+  } else {
+    hash.update('frame-payload\0').update(String(frameCounter)).update('\0').update(payload);
+  }
+  return hash.digest('hex');
+}
+
 module.exports = {
   MAX_BODY_BYTES,
   RATE_LIMIT_REQUESTS,
   authenticateWebhookRequest,
+  buildIngestEventId,
+  normalizeDeviceId,
   resetRateLimits,
   tokenMatches
 };

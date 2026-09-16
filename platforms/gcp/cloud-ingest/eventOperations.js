@@ -164,6 +164,7 @@ exports.checkOutEventBoat = onCall(CALLABLE_OPTIONS, async (request) => {
     const decision = checkoutBatteryDecision({
       millivolts,
       readingTimestamp: boat.last_ping?.timestamp,
+      monitoringEnabled: boat.battery_monitoring_enabled,
       serviceStatus: boat.battery_service_status,
       role: auth.token?.role,
       isAdmin: auth.token?.admin === true,

@@ -154,8 +154,10 @@ pack voltage measured under the normal active load, not voltage per cell:
 
 The dashboard uses a familiar battery icon with green, amber, red, critical,
 and unverified states; voltage remains available in its accessible label and
-tooltip. Checkout requires a plausible reading received within 15 minutes. Red
-checkout requires a manager or administrator reason code and records a
+tooltip. Before a tracker is fitted, a missing battery service state is treated
+as ready. The first authenticated telemetry initializes monitoring; checkout
+then requires a plausible reading received within 15 minutes. Red checkout
+requires a manager or administrator reason code and records a
 one-trip audit event; critical checkout cannot be overridden. Charging removes
 the boat from availability, and reinstall requires three consecutive green
 tracker readings with strictly increasing LoRaWAN frame counters before
@@ -266,6 +268,7 @@ boats/{DevEUI}
 ├── tracking_enabled               gates breadcrumb retention
 ├── booked, booked_by, passenger_count, time_out, actual_time_back
 ├── battery_service_status         ready | charging | verification
+├── battery_monitoring_enabled     false before first authenticated uplink
 ├── battery cycle counters and one-trip override state
 ├── last_ping { protocol_version, latitude, longitude, battery_mv,
 │               battery_health, low_battery, gps_fix, inside_dock_geofence,

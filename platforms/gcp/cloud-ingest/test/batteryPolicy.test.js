@@ -28,6 +28,11 @@ test('allows amber and green batteries without an override', () => {
   assert.deepEqual(checkoutBatteryDecision({ millivolts: 5000, readingTimestamp, serviceStatus: 'ready', role: 'staff' }), { allowed: true, health: 'green', override: false });
 });
 
+test('allows only explicitly pre-device boats to bypass telemetry checks', () => {
+  assert.deepEqual(checkoutBatteryDecision({ millivolts: 0, monitoringEnabled: false, role: 'staff' }), { allowed: true, health: 'unknown', override: false });
+  assert.equal(checkoutBatteryDecision({ millivolts: 0, role: 'staff' }).reason, 'battery-service-unverified');
+});
+
 test('red batteries require an approved manager or administrator reason code', () => {
   const readingTimestamp = new Date();
   assert.equal(checkoutBatteryDecision({ millivolts: 4300, readingTimestamp, serviceStatus: 'ready', role: 'staff', overrideReason: 'operational-necessity' }).reason, 'management-override-required');

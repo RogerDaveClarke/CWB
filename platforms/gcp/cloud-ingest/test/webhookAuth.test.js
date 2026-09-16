@@ -4,6 +4,8 @@ const {
   MAX_BODY_BYTES,
   RATE_LIMIT_REQUESTS,
   authenticateWebhookRequest,
+  buildIngestEventId,
+  normalizeDeviceId,
   resetRateLimits
 } = require('../webhookAuth');
 
@@ -38,6 +40,20 @@ test('rejects missing and invalid credentials', () => {
 
 test('accepts a valid credential', () => {
   assert.deepEqual(authenticateWebhookRequest(request(), TOKEN), { ok: true });
+});
+
+test('normalizes valid mixed-case device identities', () => {
+  assert.equal(normalizeDeviceId('70B3D57ED0000001'), '70b3d57ed0000001');
+  assert.equal(normalizeDeviceId('not-a-device'), null);
+});
+
+test('fallback replay identity is stable across device casing and request formatting', () => {
+  const payload = Buffer.from('01020304', 'hex');
+  const event = { eventType: 'up', frameCounter: 42, payload };
+  const uppercaseId = buildIngestEventId({ ...event, boatId: normalizeDeviceId('70B3D57ED0000001') });
+  const lowercaseId = buildIngestEventId({ ...event, boatId: normalizeDeviceId('70b3d57ed0000001') });
+  assert.equal(uppercaseId, lowercaseId);
+  assert.notEqual(uppercaseId, buildIngestEventId({ ...event, boatId: normalizeDeviceId('70b3d57ed0000001'), frameCounter: 43 }));
 });
 
 test('requires POST with a JSON body', () => {

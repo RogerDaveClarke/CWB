@@ -1,9 +1,8 @@
 const { initializeApp } = require('firebase-admin/app');
-const { createHash } = require('node:crypto');
 const { getFirestore, FieldValue, Timestamp } = require('firebase-admin/firestore');
 const { setGlobalOptions } = require('firebase-functions/v2');
 const { onRequest } = require('firebase-functions/v2/https');
-const { authenticateWebhookRequest } = require('./webhookAuth');
+const { authenticateWebhookRequest, buildIngestEventId, normalizeDeviceId } = require('./webhookAuth');
 const { logSecurityEvent } = require('./securityLog');
 const { batteryHealth, batteryVerificationProgress } = require('./batteryPolicy');
 
@@ -39,18 +38,19 @@ exports.telemetryIngest = onRequest({
       return res.status(400).send('Missing uplink event body.');
     }
 
-    const boatId = integrationData.deviceInfo?.devEui
+    const suppliedBoatId = integrationData.deviceInfo?.devEui
       || integrationData.dev_eui
       || integrationData.device_id;
     const base64Payload = integrationData.data || integrationData.payload_raw;
     const frameCounter = Number(integrationData.fCnt ?? integrationData.f_cnt);
-    if (typeof boatId !== 'string' || typeof base64Payload !== 'string') {
+    if (typeof suppliedBoatId !== 'string' || typeof base64Payload !== 'string') {
       return res.status(400).send('Missing device identity or base64 uplink data.');
     }
     if (!Number.isSafeInteger(frameCounter) || frameCounter < 0) {
       return res.status(400).send('Missing or invalid uplink frame counter.');
     }
-    if (!/^[0-9a-f]{16}$/i.test(boatId)) {
+    const boatId = normalizeDeviceId(suppliedBoatId);
+    if (!boatId) {
       return res.status(400).send('Invalid device identity.');
     }
 
@@ -107,17 +107,13 @@ exports.telemetryIngest = onRequest({
       timestamp: FieldValue.serverTimestamp()
     };
 
-    const eventIdentity = integrationData.deduplicationId
-      || integrationData.deduplication_id
-      || req.rawBody
-      || JSON.stringify(integrationData);
-    const eventId = createHash('sha256')
-      .update(boatId.toLowerCase())
-      .update('\0')
-      .update(String(req.query.event || 'up'))
-      .update('\0')
-      .update(eventIdentity)
-      .digest('hex');
+    const eventId = buildIngestEventId({
+      boatId,
+      eventType: String(req.query.event || 'up'),
+      frameCounter,
+      payload: buffer,
+      deduplicationId: integrationData.deduplicationId || integrationData.deduplication_id
+    });
     const trackingRef = db.collection('boats').doc(boatId);
     const receiptRef = db.collection('_ingest_receipts').doc(eventId);
     const verificationEventRef = db.collection('battery_service_events').doc(`charge-verified-${eventId}`);
@@ -135,7 +131,8 @@ exports.telemetryIngest = onRequest({
       const boat = boatSnapshot.data();
       const trackingUpdate = {
         last_ping: trackingEnabled ? pingPayload : operationalPingPayload,
-        device_id: boatId
+        device_id: boatId,
+        battery_monitoring_enabled: true
       };
       if (boat.battery_service_status == null) trackingUpdate.battery_service_status = 'ready';
       if (boat.battery_cycle_started_at) {

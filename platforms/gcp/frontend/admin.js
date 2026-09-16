@@ -485,6 +485,7 @@ async function saveBoat(config) {
         rental_season_end: config.seasonEnd,
         rental_schedule: config.schedule
     };
+    if (!state.editingId) payload.battery_monitoring_enabled = false;
     if (state.demoMode) {
         state.boats.set(config.id, normalizeBoat(config.id, payload));
         localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify([...state.boats.values()]));

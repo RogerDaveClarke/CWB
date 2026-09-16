@@ -7,7 +7,7 @@ const {
   assertSucceeds,
   initializeTestEnvironment
 } = require('@firebase/rules-unit-testing');
-const { doc, getDoc, getDocs, collection, updateDoc } = require('firebase/firestore');
+const { doc, getDoc, getDocs, collection, setDoc, updateDoc } = require('firebase/firestore');
 
 const projectId = 'demo-cwb-security-rules';
 let environment;
@@ -34,6 +34,7 @@ test.before(async () => {
       rental_season_start: '03-15',
       rental_season_end: '10-15',
       rental_schedule: {},
+      battery_monitoring_enabled: false,
       tracking_enabled: false,
       booked: false
     });
@@ -87,6 +88,30 @@ test('rental updates are server-authoritative even for MFA operations users', as
     firebase: { sign_in_second_factor: 'totp' }
   });
   await assertFails(updateDoc(doc(staffWithMfa, 'boats/70b3d57ed0000001'), update));
+});
+
+test('boat creation requires an immutable pre-device monitoring state', async () => {
+  const adminDb = authenticatedDb('admin-1', {
+    admin: true,
+    role: 'admin',
+    functionLevel: 'administration',
+    firebase: { sign_in_second_factor: 'totp' }
+  });
+  const boat = {
+    device_id: '70b3d57ed0000002',
+    vessel_name: 'New Boat',
+    boat_type: 'Row',
+    availability_status: 'available',
+    report_interval_minutes: 3,
+    schedule_year: 2026,
+    rental_season_start: '03-15',
+    rental_season_end: '10-15',
+    rental_schedule: {}
+  };
+  await assertFails(setDoc(doc(adminDb, 'boats/70b3d57ed0000002'), boat));
+  await assertFails(setDoc(doc(adminDb, 'boats/70b3d57ed0000002'), { ...boat, battery_monitoring_enabled: true }));
+  await assertSucceeds(setDoc(doc(adminDb, 'boats/70b3d57ed0000002'), { ...boat, battery_monitoring_enabled: false }));
+  await assertFails(updateDoc(doc(adminDb, 'boats/70b3d57ed0000002'), { battery_monitoring_enabled: true }));
 });
 
 test('users can read only their own profile while MFA admins can list users', async () => {

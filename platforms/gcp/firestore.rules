@@ -66,7 +66,8 @@ service cloud.firestore {
         && request.resource.data.schedule_year is int
         && request.resource.data.rental_season_start is string
         && request.resource.data.rental_season_end is string
-        && request.resource.data.rental_schedule is map;
+        && request.resource.data.rental_schedule is map
+        && request.resource.data.battery_monitoring_enabled is bool;
     }
 
     function configurationKeys() {
@@ -84,10 +85,15 @@ service cloud.firestore {
       ];
     }
 
+    function boatCreationKeys() {
+      return configurationKeys().concat(['battery_monitoring_enabled']);
+    }
+
     match /boats/{boatId} {
       allow read: if hasOperationsAccess();
       allow create: if isAdmin()
-        && request.resource.data.keys().hasOnly(configurationKeys())
+        && request.resource.data.keys().hasOnly(boatCreationKeys())
+        && request.resource.data.battery_monitoring_enabled == false
         && validBoatConfiguration(boatId);
       allow update: if hasMfaOperationsAccess()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(configurationKeys())

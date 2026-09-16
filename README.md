@@ -43,8 +43,10 @@ The four-cell NiCd pack is graded under normal active load: green above 4.8 V,
 amber from above 4.4 V through 4.8 V, red from above 4.0 V through 4.4 V, and
 critical at or below 4.0 V. These are total pack voltages. The GCP dashboard
 uses a color-coded battery icon and keeps measured voltage in its accessible
-detail. Checkout requires telemetry received within 15 minutes. Red checkout
-requires an audited manager or administrator reason code; critical checkout is
+detail. Until a tracker is fitted and its first authenticated telemetry sets
+the battery service state, the boat is treated as battery-ready. After that,
+checkout requires telemetry received within 15 minutes. Red checkout requires
+an audited manager or administrator reason code; critical checkout is
 prohibited. Charging and three increasing-frame, green post-installation
 readings remove a boat from availability. The current firmware's 4.2 V
 compatibility flag and divider calibration still require hardware follow-up.
@@ -229,6 +231,7 @@ does not overwrite configuration or rental fields.
 | `actual_time_back` | Timestamp | Optional transient field | Explicit return time when supplied; cleared by the current lifecycle |
 | `rental_updated_at` | Timestamp | Set on check-out/check-in | Last rental-state transition |
 | `battery_service_status` | String enum | Battery workflow | `ready`, `charging`, or `verification` |
+| `battery_monitoring_enabled` | Boolean | Device enrollment | `false` until the first authenticated tracker uplink, then server-set to `true` |
 | `battery_override_active` | Boolean | Active rental only | One-trip red-battery override; cleared at check-in |
 | `battery_cycle_*` | Timestamp/integer fields | Current charge cycle | Starting/minimum voltage, trip count, and operating minutes |
 | `last_ping` | Map | Set by ingest | Latest decoded telemetry, described below |
