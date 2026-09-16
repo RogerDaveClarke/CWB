@@ -14,6 +14,19 @@ Project: `cwb-boat-operations-c50dd`; primary region: `us-west1`.
 - An hourly identity reconciliation compares Firebase Auth disabled/claim state with live Firestore profiles and alerts on drift.
 - Forced browser session exits emit pseudonymous security events before local sign-out and reload.
 
+## Local App Check
+
+Production reCAPTCHA Enterprise keys are restricted to Firebase Hosting domains,
+so localhost must use a registered App Check debug token. Generate a random token
+into `FIREBASE_APP_CHECK_DEBUG_TOKEN` in ignored `local.env`, then have a project
+App Check administrator register that value for the Firebase web app under
+**Firebase Console > App Check > Apps > Manage debug tokens**. Restart
+`npm run dev` after changing `local.env`.
+
+Debug tokens are development credentials. Never add one to `production.env`,
+commit it, paste it into logs, or use it from a non-loopback origin. The frontend
+rejects configured debug tokens outside `localhost`, `127.0.0.1`, and `::1`.
+
 ## Release Order
 
 1. Run both gates, Cloud Function tests, and Firestore emulator tests.

@@ -21,6 +21,7 @@ function firebaseConfigModule() {
         messagingSenderId: env.FIREBASE_MESSAGING_SENDER_ID || "",
         appId: env.FIREBASE_APP_ID || "",
         appCheckSiteKey: env.FIREBASE_APP_CHECK_SITE_KEY || "",
+        appCheckDebugToken: env.FIREBASE_APP_CHECK_DEBUG_TOKEN || "",
         region: env.GCP_REGION || env.FIREBASE_REGION || "us-west1"
     };
     return `// Generated at runtime from local.env - do not edit.\nexport const firebaseConfig = ${JSON.stringify(config, null, 2)};\n`;

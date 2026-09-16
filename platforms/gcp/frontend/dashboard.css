@@ -87,12 +87,21 @@ tbody tr.alert-row { box-shadow: inset 3px 0 #ef4444; }
 .badge { display: inline-flex; align-items: center; gap: 5px; min-height: 22px; padding: 2px 7px; border: 1px solid; border-radius: 999px; font-size: 10px; font-weight: 700; }
 .badge.available { color: #38bdf8; border-color: rgb(56 189 248 / .35); background: rgb(56 189 248 / .09); }
 .badge.rented { color: #4ade80; border-color: rgb(74 222 128 / .35); background: rgb(74 222 128 / .09); }
-.badge.overdue, .badge.warning { color: #f87171; border-color: rgb(248 113 113 / .4); background: rgb(248 113 113 / .09); }
+.badge.overdue, .badge.warning, .badge.battery-low { color: #f87171; border-color: rgb(248 113 113 / .4); background: rgb(248 113 113 / .09); }
+.badge.battery-unverified { color: #a1a1aa; border-color: rgb(161 161 170 / .4); background: rgb(161 161 170 / .09); }
+.badge.charging { color: #60a5fa; border-color: rgb(96 165 250 / .4); background: rgb(96 165 250 / .09); }
+.badge.verification { color: #fbbf24; border-color: rgb(251 191 36 / .4); background: rgb(251 191 36 / .09); }
 .badge.maintenance { color: #a1a1aa; border-color: rgb(161 161 170 / .35); background: rgb(161 161 170 / .09); }
 .badge-dot { width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
-.battery-track { width: 72px; height: 5px; margin-top: 5px; overflow: hidden; border-radius: 999px; background: var(--border); }
-.battery-fill { height: 100%; border-radius: inherit; background: #22c55e; }
-.battery-fill.low { background: #ef4444; }
+.battery-visual { --battery-color: #22c55e; display: inline-flex; align-items: center; gap: 7px; color: var(--muted); }
+.battery-case { position: relative; width: 34px; height: 16px; padding: 2px; display: block; border: 2px solid currentColor; border-radius: 3px; color: var(--battery-color); }
+.battery-case::after { content: ""; position: absolute; top: 3px; right: -5px; width: 3px; height: 6px; border-radius: 0 2px 2px 0; background: currentColor; }
+.battery-level { display: block; height: 100%; min-width: 2px; background: currentColor; }
+.battery-state { color: var(--text); font: 10px "JetBrains Mono", monospace; }
+.battery-visual.amber { --battery-color: #f59e0b; }
+.battery-visual.red, .battery-visual.critical { --battery-color: #ef4444; }
+.battery-visual.critical .battery-case { animation: warning-pulse 1.35s ease-out infinite; }
+.battery-visual.unknown { --battery-color: #71717a; }
 .alerts-panel { min-height: 58px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); overflow: hidden; }
 .panel-heading { height: 38px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px; border-bottom: 1px solid var(--border); font-size: 11px; font-weight: 700; text-transform: uppercase; }
 .count-badge { min-width: 20px; height: 19px; padding: 0 6px; display: inline-grid; place-items: center; border-radius: 999px; background: var(--border); color: var(--muted); font: 10px "JetBrains Mono", monospace; }
@@ -142,6 +151,10 @@ tbody tr.alert-row { box-shadow: inset 3px 0 #ef4444; }
 .dock-action.check-in { color: #4ade80; border-color: rgb(74 222 128 / .45); background: rgb(74 222 128 / .1); }
 .dock-action.check-in:hover { color: #f0fdf4; background: #16a34a; border-color: #16a34a; }
 .dock-action:disabled { cursor: not-allowed; color: var(--subtle); border-color: var(--border); background: transparent; }
+.dock-actions { display: inline-flex; align-items: center; gap: 5px; }
+.dock-action.service { color: #fbbf24; border-color: rgb(251 191 36 / .45); background: rgb(251 191 36 / .1); }
+.dock-action.service:hover { color: #111827; border-color: #fbbf24; background: #fbbf24; }
+.dock-action.icon-only { min-width: 28px; width: 28px; padding: 0; }
 
 .primary-button, .secondary-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 34px; padding: 0 12px; border-radius: 4px; font-size: 11px; font-weight: 700; transition: background 150ms ease, border-color 150ms ease, color 150ms ease, opacity 150ms ease; }
 .secondary-button { border: 1px solid var(--border); background: var(--panel-raised); color: var(--muted); }
@@ -156,14 +169,17 @@ tbody tr.alert-row { box-shadow: inset 3px 0 #ef4444; }
 .rental-header h2 { margin-top: 3px; font-size: 17px; font-weight: 700; }
 .rental-body { display: grid; gap: 11px; padding: 15px; }
 .rental-body label { display: grid; gap: 5px; color: var(--muted); font-size: 10px; font-weight: 700; }
-.rental-body input:not([type="checkbox"]), .rental-body select { width: 100%; height: 36px; padding: 0 9px; border: 1px solid var(--border); border-radius: 4px; outline: 0; background: var(--bg); color: var(--text); font: 12px "JetBrains Mono", monospace; }
-.rental-body input:not([type="checkbox"]):focus, .rental-body select:focus { border-color: #0ea5e9; box-shadow: 0 0 0 2px rgb(14 165 233 / .12); }
+.rental-body input:not([type="checkbox"]), .rental-body select, .rental-body textarea { width: 100%; padding: 0 9px; border: 1px solid var(--border); border-radius: 4px; outline: 0; background: var(--bg); color: var(--text); font: 12px "JetBrains Mono", monospace; }
+.rental-body input:not([type="checkbox"]), .rental-body select { height: 36px; }
+.rental-body textarea { min-height: 72px; padding-block: 8px; resize: vertical; }
+.rental-body input:not([type="checkbox"]):focus, .rental-body select:focus, .rental-body textarea:focus { border-color: #0ea5e9; box-shadow: 0 0 0 2px rgb(14 165 233 / .12); }
 .rental-body .nda-confirmation { display: flex; align-items: center; gap: 8px; color: var(--text); font-size: 11px; line-height: 1.4; }
 .rental-body .nda-confirmation input { width: 14px; height: 14px; margin: 0; accent-color: #0284c7; }
 .privacy-note { display: flex; gap: 8px; padding: 10px; border: 1px solid rgb(56 189 248 / .3); border-radius: 5px; background: rgb(56 189 248 / .07); color: var(--muted); font-size: 11px; line-height: 1.5; }
 .privacy-note ul { margin: 5px 0 0; padding-left: 15px; list-style: disc; }
 .rental-summary { color: var(--text); font-size: 12px; }
 .rental-summary strong { font-weight: 700; }
+.battery-service-summary { display: grid; gap: 12px; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .form-message { margin: 0 15px; padding: 9px 10px; border: 1px solid rgb(248 113 113 / .4); border-radius: 4px; background: rgb(248 113 113 / .08); color: #fca5a5; font-size: 11px; }
 .form-message.success { border-color: rgb(74 222 128 / .4); background: rgb(74 222 128 / .08); color: #86efac; }
 .rental-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 13px 15px; border-top: 1px solid var(--border); }

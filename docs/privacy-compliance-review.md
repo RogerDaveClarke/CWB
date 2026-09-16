@@ -3,7 +3,7 @@
 **Scope:** CWB rowboat tracking system — firmware, ChirpStack ingest, GCP/Firestore
 platform, operations dashboard, administration and rental history pages.
 **Reviewed against:** Washington State and US federal privacy law.
-**Date:** 2026-08-24
+**Date:** 2026-09-15
 
 > **This is an engineering review, not legal advice.** It is written by the
 > engineering team to identify risk and drive design decisions. Washington's My
@@ -17,13 +17,15 @@ platform, operations dashboard, administration and rental history pages.
 | Data | Where it lives | Linked to a person? |
 | :--- | :--- | :--- |
 | Renter full name (`booked_by`) | `boats/{DevEUI}` | Directly identifying |
-| Precise GPS, ~15 min cadence | `boats/{DevEUI}/history`, `last_ping` | Yes, while checked out |
+| Precise GPS, configurable 1–60 min cadence (3 min current default; 5 min target) | `boats/{DevEUI}/history`, `last_ping` | Yes, while checked out |
 | Party size (`passenger_count`) | `boats/{DevEUI}`, `rental_history` | Indirectly |
-| Max thermal pixel (`max_temperature_c`) | `last_ping`, trail entries | Body-heat derived |
+| Max thermal pixel (`max_temperature_c`) | Current protocol v1 `last_ping` and trail entries | Body-heat derived; removal planned with the new hardware revision |
 | Mooring variance | `last_ping`, trail entries | Behavioural |
 | Rental times | `rental_history` | Pseudonymous |
 | Staff account email, name, address, role | Firebase Auth, `users/{uid}` | Directly identifying |
 | Pending staff invitation details | `user_invitations/{tokenHash}` | Directly identifying |
+| Battery service and charge-cycle telemetry | `battery_service_events`, `battery_cycles` | Boat-linked; override actions include a pseudonymous staff identifier |
+| Optional MicroSD storage | Target tracker hardware only | Precise location logging is disabled pending retention and physical-recovery rules |
 
 GPS resolution is far finer than the 1,750 ft threshold that makes location
 "precise location information" under RCW 19.373.010(19).
@@ -52,7 +54,7 @@ government agencies and tribal nations are. CWB almost certainly falls in the
    signs, symptoms, or measurements." Recreational rowing is exercise. If CWB
    markets rowing in wellness or fitness terms, that materially strengthens the
    argument that it is such a service.
-2. **The AMG8833 thermal array measures body heat.** Under
+2. **The currently implemented AMG8833 thermal array measures body heat.** Under
    RCW 19.373.010(8)(b)(v), "bodily functions, vital signs, symptoms, or
    measurements" are consumer health data when linked to a consumer. This
    reading currently applies, because the thermal value is stored in the same
@@ -66,8 +68,9 @@ precisely to detect consumers' boats. If CWB is deemed to provide "health care
 services," **the mooring geofence itself could be implicated.** No dollar
 threshold or intent requirement softens this. Counsel should address it directly.
 
-**Engineering recommendation regardless of the answer:** stop storing
-`max_temperature_c` unless there is a documented operational purpose. It is the
+**Engineering recommendation regardless of the answer:** complete the approved
+hardware transition without carrying `max_temperature_c` into protocol v2
+unless a documented operational purpose and legal basis are approved. It is the
 single field that most strongly pulls this system into MHMDA scope, and nothing
 in the product currently uses it.
 
@@ -77,40 +80,14 @@ in the product currently uses it.
 
 Severity reflects engineering risk. IDs match `tools/privacy-gate/privacy-policy.json`.
 
-### P001 — CRITICAL: renter identity and live location are world-readable
+### P001 — World-readable renter identity and live location (resolved)
 
-`platforms/gcp/firestore.rules` grants `allow read: if true` on both
-`/boats/{boatId}` and `/boats/{boatId}/history`. The boat document holds
-`booked_by` (full name) alongside `last_ping` coordinates.
-
-**Anyone on the internet who knows the Firebase project ID can read the name of
-the person currently in a given boat and their live position, plus their full
-route history.** The Firebase web API key is embedded in client JavaScript, as
-it is designed to be — the rules are the only access control, and they permit
-everything.
-
-This is the most serious finding in the review. It implicates:
-
-- **RCW 19.373.050(1)(a)** — access must be restricted to those for whom it is
-  necessary. Unauthenticated public read is the opposite.
-- **RCW 19.373.030(1)** — public exposure is "sharing" without consent.
-- **FTC Act s5** — the product tells renters their data is protected.
-- **RCW 19.255.010** — this may already constitute a reportable exposure.
-
-Real-world harm is not abstract: a named individual's live position on open
-water is a stalking and domestic-violence risk.
-
-**Remediation.** Firestore has no field-level read control, so this cannot be
-fixed by tweaking a condition. Split the data:
-
-- Keep public: boat name, coordinates, mooring state, battery — no identity.
-- Move to an admin-only collection: `booked_by`, `passenger_count`,
-  and the rental linkage.
-- Require authentication to read `boats/{id}/history`, or drop the public route
-  trail entirely.
-
-The dashboard already authenticates for check-in/check-out, so staff retain
-access with no workflow change.
+Firestore no longer permits public reads of boats or their history. Access now
+requires a verified, active profile whose role and function level agree with
+the Firebase token. Administrators, managers, and staff with Operations access
+may read operational boat data; volunteers and unauthenticated users cannot.
+Rules emulator tests and the privacy gate block restoration of unconditional
+public reads.
 
 ### P002 — Retained log allowlist (currently passing)
 
@@ -123,13 +100,12 @@ against regression.
 `cloud-ingest/index.js` writes a breadcrumb only when `tracking_enabled` is
 true. Enforcing this server-side rather than in the browser is correct.
 
-### P004 — Erasure at check-in (currently passing, with a caveat)
+### P004 — Erasure at check-in (currently passing)
 
-Check-in deletes the trail and clears identity. **Caveat:** deletion runs as a
-client-side loop in `dashboard.js`. If the browser is closed mid-operation, the
-trail partially survives while the UI has already reported erasure. Under
-RCW 19.373.040(1)(c) the deletion duty is absolute. Move this to a callable
-Cloud Function so it is atomic and auditable.
+The MFA-protected `checkInBoat` callable disables tracking and clears renter
+identity and latest coordinates in a server-side transaction, then recursively
+deletes the trail before reporting success. Disabling tracking first prevents
+new breadcrumbs during deletion, and repeated check-in calls retry cleanup.
 
 ### P005 — Overstated anonymisation claim (fixed in this change)
 
@@ -142,15 +118,11 @@ public commitment not to re-identify and contractual obligations on recipients.
 Overstating erasure is an FTC Act s5 deception risk and, via RCW 19.373.090, a
 per se CPA violation. Wording is now precise; the gate blocks recurrence.
 
-### P006 — MEDIUM: unbounded retention when a rental is never closed
+### P006 — Unbounded trail retention (resolved)
 
-Erasure is triggered only by check-in. A boat that is never checked in — staff
-forget, browser closes, hardware fails — retains its trail indefinitely. The
-Wix variant prunes at 30 days; GCP has no equivalent. Contrast
-RCW 19.373.030(1)(a)(ii), which permits collection only to the extent necessary.
-
-**Remediation.** Scheduled purge deleting trails older than the maximum rental
-window, independent of check-in.
+Check-in remains the primary erasure event. As a backstop,
+`purgeExpiredTrails` runs every six hours and deletes history older than 48
+hours, independent of browser state or whether staff completed check-in.
 
 ### P007 — MEDIUM: no consent artifact
 
@@ -169,26 +141,36 @@ the homepage. RCW 19.373.040 requires mechanisms to confirm, access, withdraw
 consent, and delete, with a 45-day response deadline and an appeal path. None
 exist.
 
-### P009 — MEDIUM: no age gating (COPPA)
+### Additional legal risk — no age gating (COPPA)
 
 CWB runs youth programs. COPPA (16 CFR 312.2) treats geolocation identifying
 street and town as personal information for children under 13, requiring
 verifiable parental consent (16 CFR 312.5). The renter name field has no age
 gate and no parental consent path. Penalties are assessed per violation.
 
-### P010 — LOW: excessive privilege for dock staff
+### P009 — Staff account store access (currently passing)
 
-Check-in/check-out requires the `admin` custom claim — the same claim that
-authorises fleet reconfiguration. RCW 19.373.050(1)(a) calls for access limited
-to what is necessary. Split into a `staff` claim for rentals and reserve `admin`
-for configuration.
+The `users` collection is never public. A user may read only their own matching
+profile; an MFA administrator may list accounts, and role writes occur only
+through guarded Cloud Functions. Operations and Administration are separate
+function levels, and administration links remain hidden from Operations users.
 
-### P011 — LOW: biometric analysis is resolution-dependent
+### Battery lifecycle records
 
-An 8x8 thermal array cannot identify a specific individual, so it is very likely
-outside RCW 19.375 (which also excludes photographs and video). This conclusion
-**depends on the sensor's resolution**. The MLX90621 evaluation part is 16x4;
-materially higher resolution would require re-analysis.
+Battery service events and completed cycle summaries are stored separately from
+rental history and GPS trails. They contain no renter name, party size, or
+coordinates. Override rationale is a controlled operational code rather than
+free text. A red-battery override includes a one-way pseudonymous staff actor
+identifier for accountability; this remains personal data, is deleted after
+one year, and must not be described as anonymous.
+
+### Additional hardware risk — local storage and thermal transition
+
+The current 8x8 thermal array is unlikely to identify a specific individual,
+but its body-heat measurement still strengthens the MHMDA applicability
+question. The approved tracker revision removes the thermal array. MicroSD is
+present in the target hardware but must not log renter-linked GPS until CWB has
+approved a bounded retention, overwrite, access, and physical-recovery policy.
 
 ---
 
@@ -208,12 +190,10 @@ Worth preserving under change:
 
 | Priority | Finding | Action |
 | :--- | :--- | :--- |
-| 1 | P001 | Split identity from the public document; authenticate trail reads |
-| 2 | Section 2 | Get a written MHMDA applicability determination |
-| 3 | P007, P008 | Consent artifact, privacy policy, consumer rights |
-| 4 | P009 | Decide whether minors can be renters; gate accordingly |
-| 5 | P004, P006 | Server-side atomic erasure plus a scheduled purge |
-| 6 | P010, thermal | Split the staff claim; drop `max_temperature_c` |
+| 1 | Section 2 | Get a written MHMDA applicability determination |
+| 2 | P007, P008 | Consent artifact, privacy policy, consumer rights |
+| 3 | COPPA risk | Decide whether minors can be renters; gate accordingly |
+| 4 | Hardware transition | Remove thermal telemetry unless approved; define MicroSD retention before enabling local logs |
 
 ---
 

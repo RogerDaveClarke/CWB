@@ -2,6 +2,8 @@ const { initializeApp, getApps } = require('firebase-admin/app');
 const { getFirestore, FieldValue, Timestamp } = require('firebase-admin/firestore');
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { requireMfaOperations } = require('./authGuards');
+const { checkoutBatteryDecision } = require('./batteryPolicy');
+const { pseudonymousId } = require('./securityLog');
 
 if (!getApps().length) initializeApp();
 const db = getFirestore();
@@ -12,6 +14,7 @@ const CALLABLE_OPTIONS = {
 };
 const EVENT_STATUSES = new Set(['planned', 'active', 'completed', 'cancelled']);
 const PARTICIPATION_TYPES = new Set(['Public renter', 'Event participant', 'CWB volunteer', 'CWB staff', 'Charter guest']);
+const BATTERY_EVENT_RETENTION_MS = 365 * 24 * 60 * 60 * 1000;
 
 function requiredText(value, field, maxLength = 80) {
   const normalized = typeof value === 'string' ? value.trim() : '';
@@ -58,7 +61,21 @@ function validateDepartureInput(data = {}) {
   if (!Number.isInteger(durationMinutes) || durationMinutes < 15 || durationMinutes > 480) {
     throw new HttpsError('invalid-argument', 'Trip duration must be between 15 and 480 minutes.');
   }
-  return { eventId, boatId, responsibleName, participationType, passengerCount, durationMinutes };
+  return { eventId, boatId, responsibleName, participationType, passengerCount, durationMinutes, overrideReason: data.overrideReason };
+}
+
+function batteryFailure(reason) {
+  const messages = {
+    'battery-charging': 'The battery is being charged.',
+    'battery-verification': 'Wait for three green device readings after installing the battery.',
+    'battery-service-unverified': 'The battery service state must be verified before checkout.',
+    'battery-unverified': 'A current battery reading is required before checkout.',
+    'battery-reading-stale': 'The battery reading is stale. Wait for a new tracker report.',
+    'battery-critical': 'The battery is critically low and cannot be overridden.',
+    'management-override-required': 'A manager or administrator must authorize this red-battery trip.',
+    'override-reason-required': 'Enter an override reason between 10 and 500 characters.'
+  };
+  return new HttpsError('failed-precondition', messages[reason] || 'The battery is not ready for checkout.');
 }
 
 exports.createEvent = onCall(CALLABLE_OPTIONS, async (request) => {
@@ -122,12 +139,13 @@ exports.setEventStatus = onCall(CALLABLE_OPTIONS, async (request) => {
 });
 
 exports.checkOutEventBoat = onCall(CALLABLE_OPTIONS, async (request) => {
-  await requireMfaOperations(request);
+  const auth = await requireMfaOperations(request);
   const input = validateDepartureInput(request.data);
   const eventRef = db.collection('events').doc(input.eventId);
   const boatRef = db.collection('boats').doc(input.boatId);
   const sessionRef = eventRef.collection('boat_sessions').doc(input.boatId);
   const activityRef = eventRef.collection('activity').doc();
+  const overrideEventRef = db.collection('battery_service_events').doc();
   const departedAt = new Date();
   const dueAt = new Date(departedAt.getTime() + input.durationMinutes * 60000);
 
@@ -142,13 +160,24 @@ exports.checkOutEventBoat = onCall(CALLABLE_OPTIONS, async (request) => {
     if (boat.tracking_enabled === true || boat.availability_status !== 'available') {
       throw new HttpsError('failed-precondition', 'The boat is not available at the dock.');
     }
+    const millivolts = Number(boat.last_ping?.battery_mv || 0);
+    const decision = checkoutBatteryDecision({
+      millivolts,
+      readingTimestamp: boat.last_ping?.timestamp,
+      serviceStatus: boat.battery_service_status,
+      role: auth.token?.role,
+      isAdmin: auth.token?.admin === true,
+      overrideReason: input.overrideReason
+    });
+    if (!decision.allowed) throw batteryFailure(decision.reason);
     transaction.update(boatRef, {
       availability_status: 'rented', tracking_enabled: true, booked: true,
       booked_by: input.responsibleName, renter_type: input.participationType,
       passenger_count: input.passengerCount, rental_type: 'fixed', rental_minutes: input.durationMinutes,
       time_out: Timestamp.fromDate(departedAt), time_due_back: Timestamp.fromDate(dueAt),
       use_type: 'event', event_id: input.eventId, event_name: eventSnapshot.get('name'),
-      actual_time_back: FieldValue.delete(), rental_updated_at: FieldValue.serverTimestamp()
+      actual_time_back: FieldValue.delete(), battery_override_active: decision.override === true,
+      rental_updated_at: FieldValue.serverTimestamp()
     });
     transaction.set(sessionRef, {
       status: 'out', passenger_count: input.passengerCount,
@@ -159,6 +188,15 @@ exports.checkOutEventBoat = onCall(CALLABLE_OPTIONS, async (request) => {
       action: 'departure', boat_id: input.boatId, vessel_name: boat.vessel_name || input.boatId,
       passenger_count: input.passengerCount, occurred_at: FieldValue.serverTimestamp()
     });
+    if (decision.override) {
+      transaction.create(overrideEventRef, {
+        device_id: input.boatId, battery_id: boat.battery_id || input.boatId,
+        event_type: 'rental_override', voltage_mv: millivolts,
+        battery_health: decision.health, reason: decision.overrideReason,
+        actor_id: pseudonymousId(auth.uid), recorded_at: FieldValue.serverTimestamp(),
+        expires_at: new Date(Date.now() + BATTERY_EVENT_RETENTION_MS)
+      });
+    }
   });
   return { eventId: input.eventId, boatId: input.boatId };
 });

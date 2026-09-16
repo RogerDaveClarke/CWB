@@ -164,8 +164,14 @@ const dashboardSource = read('platforms/gcp/frontend/dashboard.js');
 if (!dashboardSource.includes('httpsCallable(functions, "checkInBoat")')) {
   failures.push('Dashboard check-in does not use the authenticated server-side lifecycle endpoint.');
 }
+if (!dashboardSource.includes('httpsCallable(functions, "checkOutBoat")')) {
+  failures.push('Dashboard checkout does not use the authenticated server-side battery-policy endpoint.');
+}
 if (/deleteDoc\([^)]*history/.test(dashboardSource) || /addDoc\([^)]*rental_history/.test(dashboardSource)) {
   failures.push('Dashboard performs a privileged rental lifecycle operation directly.');
+}
+if (/updateDoc\([^)]*boats/.test(dashboardSource)) {
+  failures.push('Dashboard performs a privileged boat lifecycle operation directly.');
 }
 
 const boatConfigSource = read('platforms/gcp/cloud-ingest/boatConfig.js');

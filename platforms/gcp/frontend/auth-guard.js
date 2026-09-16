@@ -13,6 +13,21 @@ let modulesPromise = null;
 let cachedApp = null, cachedAuth = null, cachedDb = null, cachedFunctions = null;
 let pendingMfaResolver = null;
 
+function isLoopbackHost() {
+    return ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+}
+
+function configureLocalAppCheckDebugToken() {
+    const debugToken = firebaseConfig.appCheckDebugToken;
+    const isLoopback = isLoopbackHost();
+    if (isLoopback && !debugToken) {
+        throw new Error("Local Firebase App Check requires FIREBASE_APP_CHECK_DEBUG_TOKEN in local.env.");
+    }
+    if (!debugToken) return;
+    if (!isLoopback) throw new Error("Firebase App Check debug tokens are allowed only on localhost.");
+    globalThis.FIREBASE_APPCHECK_DEBUG_TOKEN = debugToken;
+}
+
 export function isConfigValid() {
     return Boolean(firebaseConfig.projectId) && !firebaseConfig.projectId.startsWith("your-") && Boolean(firebaseConfig.apiKey);
 }
@@ -49,6 +64,7 @@ async function loadModules() {
 export async function getFirebase() {
     const { appModule, appCheckModule, authModule, firestoreModule, functionsModule } = await loadModules();
     if (!cachedApp) {
+        configureLocalAppCheckDebugToken();
         cachedApp = appModule.initializeApp(firebaseConfig);
         if (!firebaseConfig.appCheckSiteKey) {
             throw new Error("Firebase App Check is not configured.");
@@ -529,6 +545,12 @@ export async function initAuthGuard(spec, { onReady, onDenied, onSignedOut }) {
             offlineHandler = null;
         };
 
+        const showLocalAppCheckError = (user) => {
+            stopProfileWatch();
+            showAuthModal("error", { message: "This localhost App Check debug token is not registered for the Firebase web app. Ask a project App Check administrator to register FIREBASE_APP_CHECK_DEBUG_TOKEN from local.env, then restart the local server." });
+            onDenied?.("app-check-unavailable", user);
+        };
+
         const forceSessionExit = async (reason, claims = {}) => {
             if (forcingExit) return;
             forcingExit = true;
@@ -577,9 +599,14 @@ export async function initAuthGuard(spec, { onReady, onDenied, onSignedOut }) {
                 }
                 if (initialSnapshot) resolve(true);
                 initialSnapshot = false;
-            }, () => {
+            }, error => {
                 if (initialSnapshot) resolve(false);
                 initialSnapshot = false;
+                if (isLoopbackHost() && firebaseConfig.appCheckDebugToken
+                    && ["permission-denied", "unauthenticated"].includes(error?.code)) {
+                    showLocalAppCheckError(user);
+                    return;
+                }
                 void forceSessionExit("session-revoked");
             });
             offlineHandler = () => void forceSessionExit("session-unverifiable");
@@ -659,6 +686,12 @@ export async function initAuthGuard(spec, { onReady, onDenied, onSignedOut }) {
         return authModule.onAuthStateChanged(auth, user => {
             void handleAuthStateChange(user).catch(error => {
                 console.error("Authentication state verification failed", error);
+                if (error?.code?.startsWith("appCheck/") || error?.message?.includes("App Check")
+                    || (isLoopbackHost() && firebaseConfig.appCheckDebugToken
+                        && ["permission-denied", "unauthenticated"].includes(error?.code))) {
+                    showLocalAppCheckError(user);
+                    return;
+                }
                 void forceSessionExit("session-unverifiable");
             });
         });

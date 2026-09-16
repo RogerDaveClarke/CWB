@@ -16,12 +16,16 @@
     { "name": "resetUserMfa", "file": "platforms/gcp/cloud-ingest/userAdmin.js", "trigger": "onCall", "authentication": "firebase-mfa-admin", "guard": "requireMfaAdmin(request)" },
     { "name": "listUsers", "file": "platforms/gcp/cloud-ingest/userAdmin.js", "trigger": "onCall", "authentication": "firebase-mfa-admin", "guard": "requireMfaAdmin(request)" },
     { "name": "checkInBoat", "file": "platforms/gcp/cloud-ingest/userAdmin.js", "trigger": "onCall", "authentication": "firebase-mfa-operations", "guard": "requireMfaOperations(request)" },
+    { "name": "checkOutBoat", "file": "platforms/gcp/cloud-ingest/batteryOperations.js", "trigger": "onCall", "authentication": "firebase-mfa-operations", "guard": "requireMfaOperations(request)" },
+    { "name": "startBatteryCharging", "file": "platforms/gcp/cloud-ingest/batteryOperations.js", "trigger": "onCall", "authentication": "firebase-mfa-operations", "guard": "requireMfaOperations(request)" },
+    { "name": "markBatteryInstalled", "file": "platforms/gcp/cloud-ingest/batteryOperations.js", "trigger": "onCall", "authentication": "firebase-mfa-operations", "guard": "requireMfaOperations(request)" },
     { "name": "createEvent", "file": "platforms/gcp/cloud-ingest/eventOperations.js", "trigger": "onCall", "authentication": "firebase-mfa-operations", "guard": "requireMfaOperations(request)" },
     { "name": "setEventStatus", "file": "platforms/gcp/cloud-ingest/eventOperations.js", "trigger": "onCall", "authentication": "firebase-mfa-operations", "guard": "requireMfaOperations(request)" },
     { "name": "checkOutEventBoat", "file": "platforms/gcp/cloud-ingest/eventOperations.js", "trigger": "onCall", "authentication": "firebase-mfa-operations", "guard": "requireMfaOperations(request)" },
     { "name": "pushBoatConfig", "file": "platforms/gcp/cloud-ingest/boatConfig.js", "trigger": "onCall", "authentication": "firebase-mfa-admin", "guard": "requireMfaAdmin(request)" },
     { "name": "purgeExpiredTrails", "file": "platforms/gcp/cloud-ingest/retention.js", "trigger": "onSchedule", "authentication": "cloud-scheduler-iam", "guard": null },
     { "name": "purgeExpiredInvitations", "file": "platforms/gcp/cloud-ingest/retention.js", "trigger": "onSchedule", "authentication": "cloud-scheduler-iam", "guard": null },
+    { "name": "purgeExpiredBatteryEvents", "file": "platforms/gcp/cloud-ingest/retention.js", "trigger": "onSchedule", "authentication": "cloud-scheduler-iam", "guard": null },
     { "name": "retryLifecycleNotifications", "file": "platforms/gcp/cloud-ingest/userAdmin.js", "trigger": "onSchedule", "authentication": "cloud-scheduler-iam", "guard": null },
     { "name": "reconcileIdentityState", "file": "platforms/gcp/cloud-ingest/identityReconciliation.js", "trigger": "onSchedule", "authentication": "cloud-scheduler-iam", "guard": null }
   ]

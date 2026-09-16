@@ -17,22 +17,37 @@ Rental History
 Complete edge-to-cloud architecture stack orchestrating low-power asset tracking, automated cloud stream ingestion, and real-time open-map vessel visualizations.
 
 ## Hardware
- - Development BoardSeeed Studio XIAO SAMD21 (Pre-Soldered)Seeed Studio
- - LoRa Transceiver ModuleWio-SX1262 for XIAO (Supports US915)Seeed Studio
- - GPS Module: SparkFun GPS Breakout - NEO-M9N, SMA (Qwiic)
- - Real-Time Clock: SparkFun RV-1805 (Qwiic)
- - NiCad Rechargeable Battery4.8V AA NiCad Rechargeable Pack (700mAh - 1000mAh)Tenergy / BatterySpace
- - Marine Antenna915 MHz Waterproof IP67 Omnidirectional AntennaDigiKey / Amazon
- - Accelerometer: Adafruit LIS3DH (+/-2g/4g/8g/16g)
- - RAKwireless WisGate Edge Pro Solar Bundle
+
+Approved next tracker revision (2026-09-15):
+
+- Seeed Studio XIAO SAMD21
+- Wio-SX1262 LoRa transceiver for XIAO (US915)
+- SparkFun u-blox NEO-M9N GNSS breakout
+- Adafruit MicroSD breakout
+- Six-axis accelerometer/gyroscope; exact part pending
+- Analog voltage divider for pack-voltage measurement; resistor values pending
+- Four-cell 4.8 V, 2600 mAh NiCd battery pack with a suitable regulated supply
+- 915 MHz waterproof omnidirectional antenna
+- RAKwireless WisGate Edge Pro gateway
 
 ### Firmware Hardware Configuration
 
-The production firmware currently uses the NEO-M9N, RV-1805, AMG8833, LIS3DH, and Wio-SX1262. The NEO-M9N is supported by SparkFun's u-blox GNSS v3 library.
+The checked-in firmware still uses the NEO-M9N, RV-1805, AMG8833, LIS3DH, and
+Wio-SX1262 with a three-minute default reporting interval. It has not yet been
+ported to the approved MicroSD/six-axis IMU hardware or the five-minute target
+cycle. The NEO-M9N is supported by SparkFun's u-blox GNSS v3 library.
 
 The RV-1805 and AMG8833 both default to I2C address `0x69`. Close the AMG8833 address jumper to select `0x68`; the firmware is configured for that address. Connect the RV-1805 `INT` output to XIAO pin D5 and power the RTC from an unswitched 3.3V supply so it remains active while the other sensors sleep.
 
-The MLX90621 is retained as evaluation hardware. Melexis's published driver uses Mbed-specific I2C APIs and does not compile for the Arduino SAMD21 framework without an Arduino `Wire` port. It is therefore not included in the production firmware build.
+The four-cell NiCd pack is graded under normal active load: green above 4.8 V,
+amber from above 4.4 V through 4.8 V, red from above 4.0 V through 4.4 V, and
+critical at or below 4.0 V. These are total pack voltages. The GCP dashboard
+uses a color-coded battery icon and keeps measured voltage in its accessible
+detail. Checkout requires telemetry received within 15 minutes. Red checkout
+requires an audited manager or administrator reason code; critical checkout is
+prohibited. Charging and three increasing-frame, green post-installation
+readings remove a boat from availability. The current firmware's 4.2 V
+compatibility flag and divider calibration still require hardware follow-up.
 
 ---
 
@@ -88,7 +103,9 @@ The variance classifier is gated by a 55 m circular geofence centered on the CWB
 *   `platforms/gcp/cloud-ingest/index.js`: Node.js webhook target configured for HTTP **GCP Cloud Function** triggers.
 *   `platforms/gcp/frontend/index.html`: Resizable operations dashboard with a sortable, user-configurable fleet table, alerts, last positions, and an overdue-only three-point trail and direction arrow on OpenStreetMap. Column order, visibility, and sorting persist in the browser.
 *   `platforms/gcp/frontend/history.html`: Pseudonymous rental history log.
-*   `platforms/gcp/frontend/admin.html`: Administrative boat registry and annual weekly rental-schedule editor.
+*   `platforms/gcp/frontend/admin.html`: Administrator-only boat registry and annual weekly rental-schedule editor.
+*   `platforms/gcp/frontend/users.html`: Administrator-only account invitations and lifecycle management.
+*   `platforms/gcp/frontend/mfa.html`: Invitation acceptance and TOTP enrollment.
 *   `platforms/gcp/firestore.rules`: Firestore access rules for the GCP POC.
 *   `platforms/wix/backend/`: Wix Velo ingestion and retention jobs.
 *   `platforms/wix/frontend/`: Wix page and custom-element code.
@@ -106,7 +123,14 @@ git config core.hooksPath .githooks
 git hook run pre-commit
 ```
 
-The pre-commit gate scans staged content for secrets, runs deterministic privacy, security, and penetration-regression checks against the staged snapshot, verifies every GCP workload against `tools/security-gate/gcp-endpoints.json`, runs Cloud Function tests when that source changes, runs Firestore emulator authorization tests when Rules change, checks staged first-party JavaScript syntax, audits staged npm dependency trees, and runs PlatformIO static analysis against staged firmware changes. The firmware check uses the project virtual environment on Windows or POSIX.
+The pre-commit gate scans staged content for secrets, runs deterministic
+privacy, security, penetration-regression, and accessibility checks against the
+staged snapshot, verifies every GCP workload against
+`tools/security-gate/gcp-endpoints.json`, runs Cloud Function tests when that
+source changes, runs Firestore emulator authorization tests when Rules change,
+checks staged first-party JavaScript syntax, audits staged npm dependency trees,
+and runs PlatformIO static analysis against staged firmware changes. Installed
+dependencies remain ignored and are not tracked in Git.
 
 All callable functions require Firebase Authentication; privileged functions and direct Firestore administration also require the admin claim and TOTP. The public ChirpStack transport endpoint requires its Secret Manager token and enforces POST JSON requests, a 64 KiB body limit, per-instance throttling, and replay-safe writes. Pull requests run these authentication tests alongside the privacy gate, JavaScript and firmware checks, production dependency audits, and CodeQL. Dependabot monitors both npm projects and GitHub Actions. In GitHub, enable **Secret scanning** and **Push protection** under **Settings > Security > Code security and analysis**, then require the Project Security Gate and CodeQL checks in the `main` branch protection rules. Repository settings cannot be enabled by a committed workflow file.
 
@@ -166,8 +190,9 @@ names use `snake_case` in GCP and `camelCase` in Wix.
 
 Uplinks use FPort 1 and the 16-byte telemetry protocol documented above.
 Reporting-interval commands use FPort 2 with exactly one unsigned byte: the
-number of minutes from 1 through 60. The firmware defaults to 3 minutes and
-ignores other ports, malformed payloads, and out-of-range values.
+number of minutes from 1 through 60. The checked-in firmware defaults to 3
+minutes and ignores other ports, malformed payloads, and out-of-range values;
+the approved next revision changes the default operating cycle to 5 minutes.
 
 ChirpStack sends the GCP or Wix adapter an uplink event shaped as:
 
@@ -203,6 +228,9 @@ does not overwrite configuration or rental fields.
 | `time_out` | Timestamp | Present only during rental | Check-out time; deleted at check-in |
 | `actual_time_back` | Timestamp | Optional transient field | Explicit return time when supplied; cleared by the current lifecycle |
 | `rental_updated_at` | Timestamp | Set on check-out/check-in | Last rental-state transition |
+| `battery_service_status` | String enum | Battery workflow | `ready`, `charging`, or `verification` |
+| `battery_override_active` | Boolean | Active rental only | One-trip red-battery override; cleared at check-in |
+| `battery_cycle_*` | Timestamp/integer fields | Current charge cycle | Starting/minimum voltage, trip count, and operating minutes |
 | `last_ping` | Map | Set by ingest | Latest decoded telemetry, described below |
 
 `rental_schedule` contains all seven lowercase weekday keys. Each value has the
@@ -238,6 +266,7 @@ subcollection. When tracking is disabled, `last_ping` omits `latitude` and
 | `latitude` | Number | Decimal degrees |
 | `longitude` | Number | Decimal degrees |
 | `battery_mv` | Integer | Battery voltage in millivolts |
+| `battery_health` | String enum | Server classification: `green`, `amber`, `red`, or `critical` |
 | `low_battery` | Boolean | Firmware low-battery flag |
 | `gps_fix` | Boolean | Valid 3D GPS fix flag |
 | `inside_dock_geofence` | Boolean | Compatibility alias for valid dock-geofence classification |
@@ -253,7 +282,16 @@ direction arrow. Speed, bearing, estimated return time, overdue state, battery
 percentage, and operating-zone alerts are derived in the browser and are not
 stored fields.
 
-#### 4.4 Firestore `rental_history/{autoId}`
+#### 4.4 Battery service and cycle records
+
+`battery_service_events` records charging, reinstall, verification, and
+manager/administrator override actions. `battery_cycles` stores completed
+charge-cycle voltage, trip-count, and operating-minute summaries. Neither
+collection stores renter identity or GPS coordinates. Override actor IDs are
+one-way pseudonymous identifiers, not anonymous data. Service events use
+controlled reason codes instead of free text and expire after one year.
+
+#### 4.5 Firestore `rental_history/{autoId}`
 
 Check-in writes one append-only retained record, then deletes the boat's GPS
 history and active renter fields.

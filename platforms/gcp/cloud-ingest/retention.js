@@ -37,6 +37,19 @@ async function deleteExpiredInvitationBatch(db, now = Timestamp.now()) {
   return snapshot.size;
 }
 
+async function deleteExpiredBatteryEventBatch(db, now = Timestamp.now()) {
+  const snapshot = await db.collection('battery_service_events')
+    .where('expires_at', '<', now)
+    .limit(DELETE_BATCH_SIZE)
+    .get();
+  if (snapshot.empty) return 0;
+
+  const batch = db.batch();
+  snapshot.docs.forEach((document) => batch.delete(document.ref));
+  await batch.commit();
+  return snapshot.size;
+}
+
 exports.purgeExpiredTrails = onSchedule({
   schedule: 'every 6 hours',
   timeZone: 'America/Los_Angeles',
@@ -71,6 +84,23 @@ exports.purgeExpiredInvitations = onSchedule({
   console.log(JSON.stringify({ securityEvent: 'invitation_retention_purge', deleted }));
 });
 
+exports.purgeExpiredBatteryEvents = onSchedule({
+  schedule: 'every 24 hours',
+  timeZone: 'America/Los_Angeles',
+  retryCount: 3,
+  serviceAccount: 'cwb-user-admin@cwb-boat-operations-c50dd.iam.gserviceaccount.com'
+}, async () => {
+  const db = getFirestore();
+  let deleted = 0;
+  let batchSize;
+  do {
+    batchSize = await deleteExpiredBatteryEventBatch(db);
+    deleted += batchSize;
+  } while (batchSize === DELETE_BATCH_SIZE);
+  console.log(JSON.stringify({ securityEvent: 'battery_event_retention_purge', deleted }));
+});
+
 module.exports.retentionCutoff = retentionCutoff;
 module.exports.deleteExpiredTrailBatch = deleteExpiredTrailBatch;
 module.exports.deleteExpiredInvitationBatch = deleteExpiredInvitationBatch;
+module.exports.deleteExpiredBatteryEventBatch = deleteExpiredBatteryEventBatch;

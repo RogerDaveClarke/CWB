@@ -1,12 +1,13 @@
 import { firebaseConfig } from "./firebase-config.js";
 import { getFirebase, initAuthGuard, signOut, showAuthModal, isConfigValid } from "./auth-guard.js";
 import { initHeaderControls, setAdminNavigation, setHeaderUser } from "./header-nav.js";
-import { collection, deleteField, doc, limit, onSnapshot, orderBy, query, serverTimestamp, updateDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+import { collection, limit, onSnapshot, orderBy, query } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 const DOCK = { latitude: 47.62795, longitude: -122.33645 };
 const DOCK_GEOFENCE_METERS = 55;
 const OPERATING_ZONE_METERS = 1600;
 const STALE_AFTER_MINUTES = 30;
+const BATTERY_READING_MAX_AGE_MINUTES = 15;
 const DEFAULT_RENTAL_MINUTES = 60;
 const RENTER_TYPES = ["Public", "Volunteer", "Dire Hard", "Libary Pass"];
 const DEMO_RENTAL_HISTORY_KEY = "cwbDemoRentalHistory";
@@ -57,14 +58,18 @@ function toDate(value) { if (!value) return null; if (value instanceof Date) ret
 function formatTime(value, includeDate = false) { const date = toDate(value); if (!date) return "—"; return new Intl.DateTimeFormat("en-US", { year: includeDate ? "numeric" : undefined, month: includeDate ? "2-digit" : undefined, day: includeDate ? "2-digit" : undefined, hour: "numeric", minute: "2-digit" }).format(date); }
 function escapeHtml(value) { return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;"); }
 function haversineMeters(a, b) { const radius = 6371000; const radians = degrees => degrees * Math.PI / 180; const latDelta = radians(b.latitude - a.latitude); const lonDelta = radians(b.longitude - a.longitude); const lat1 = radians(a.latitude); const lat2 = radians(b.latitude); const value = Math.sin(latDelta / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(lonDelta / 2) ** 2; return 2 * radius * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value)); }
-function batteryPercent(millivolts) { return Math.round(Math.max(0, Math.min(100, ((millivolts - 4200) / 1400) * 100))); }
+function batteryPercent(millivolts) { return Math.round(Math.max(0, Math.min(100, ((millivolts - 4000) / 1200) * 100))); }
+function batteryHealth(millivolts) { if (!Number.isFinite(millivolts) || millivolts <= 0 || millivolts > 7000) return "unknown"; if (millivolts <= 4000) return "critical"; if (millivolts <= 4400) return "red"; if (millivolts <= 4800) return "amber"; return "green"; }
+function batteryLabel(boat) { const labels = { green: "Healthy", amber: "Monitor", red: "Charge required", critical: "Critical", unknown: "Unverified" }; return `${labels[boat.batteryHealth]}${boat.batteryMv ? `, ${(boat.batteryMv / 1000).toFixed(2)} volts` : ""}`; }
+function batteryReadingIsFresh(boat) { return Boolean(boat.timestamp && boat.timestamp <= new Date() && Date.now() - boat.timestamp.getTime() <= BATTERY_READING_MAX_AGE_MINUTES * 60000); }
 
 function normalizedBoat(id, raw) {
     const ping = raw.last_ping || {};
     const availability = String(raw.availability_status || raw.availabilityStatus || "").toLowerCase();
     const mooring = ping.mooring_status || "Unknown";
     const mooringValid = ping.mooring_classification_valid ?? ping.inside_dock_geofence ?? ["Tied Up at Dock", "Underway at Dock"].includes(mooring);
-    return { id, name: raw.vessel_name || raw.vesselName || raw.name || id, boatType: raw.boat_type || raw.boatType || "Row", availability: availability === "under_repair" ? "maintenance" : availability, trackingEnabled: raw.tracking_enabled ?? (availability === "rented"), booked: Boolean(raw.booked), bookedBy: raw.booked_by || raw.bookedBy || "", renterType: raw.renter_type || raw.renterType || "", passengerCount: Number(raw.passenger_count ?? raw.passengerCount ?? 0), rentalType: String(raw.rental_type || raw.rentalType || "fixed").toLowerCase(), rentalMinutes: Number(raw.rental_minutes || raw.rentalMinutes || DEFAULT_RENTAL_MINUTES), timeOut: toDate(raw.time_out || raw.timeOut), explicitDue: toDate(raw.time_due_back || raw.timeDueBack), actualReturn: toDate(raw.actual_time_back || raw.actualTimeBack), latitude: Number(ping.latitude), longitude: Number(ping.longitude), batteryMv: Number(ping.battery_mv || 0), lowBattery: Boolean(ping.low_battery), gpsFix: ping.gps_fix !== false, mooring, mooringValid: Boolean(mooringValid), variance: mooringValid && ping.variance_g2 != null ? Number(ping.variance_g2) : null, maxTemperature: ping.max_temperature_c, timestamp: toDate(ping.timestamp), protocolVersion: ping.protocol_version, raw };
+    const batteryMv = Number(ping.battery_mv || 0);
+    return { id, name: raw.vessel_name || raw.vesselName || raw.name || id, boatType: raw.boat_type || raw.boatType || "Row", availability: availability === "under_repair" ? "maintenance" : availability, trackingEnabled: raw.tracking_enabled ?? (availability === "rented"), booked: Boolean(raw.booked), bookedBy: raw.booked_by || raw.bookedBy || "", renterType: raw.renter_type || raw.renterType || "", passengerCount: Number(raw.passenger_count ?? raw.passengerCount ?? 0), rentalType: String(raw.rental_type || raw.rentalType || "fixed").toLowerCase(), rentalMinutes: Number(raw.rental_minutes || raw.rentalMinutes || DEFAULT_RENTAL_MINUTES), timeOut: toDate(raw.time_out || raw.timeOut), explicitDue: toDate(raw.time_due_back || raw.timeDueBack), actualReturn: toDate(raw.actual_time_back || raw.actualTimeBack), latitude: Number(ping.latitude), longitude: Number(ping.longitude), batteryMv, batteryHealth: batteryHealth(batteryMv), batteryServiceStatus: raw.battery_service_status || "unverified", batteryOverrideActive: raw.battery_override_active === true, gpsFix: ping.gps_fix !== false, mooring, mooringValid: Boolean(mooringValid), variance: mooringValid && ping.variance_g2 != null ? Number(ping.variance_g2) : null, maxTemperature: ping.max_temperature_c, timestamp: toDate(ping.timestamp), protocolVersion: ping.protocol_version, raw };
 }
 
 function fixedDue(boat) { if (boat.explicitDue) return boat.explicitDue; if (boat.rentalType === "fixed" && boat.timeOut) return new Date(boat.timeOut.getTime() + boat.rentalMinutes * 60000); return null; }
@@ -110,16 +115,16 @@ function vectorEstimate(boat) {
 }
 
 function isOutsideZone(boat) { return Number.isFinite(boat.latitude) && Number.isFinite(boat.longitude) && haversineMeters(boat, DOCK) > OPERATING_ZONE_METERS; }
-function operationalState(boat) { if (boat.availability === "maintenance") return "maintenance"; if (isRentalOverdue(boat) || boat.lowBattery || isOutsideZone(boat)) return "overdue"; if (boat.availability === "available" || (boat.mooring === "Tied Up at Dock" && !boat.timeOut)) return "available"; return "rented"; }
+function operationalState(boat) { if (boat.availability === "maintenance") return "maintenance"; if (boat.batteryServiceStatus === "charging") return "charging"; if (boat.batteryServiceStatus === "verification") return "verification"; if (isRentalOverdue(boat) || isOutsideZone(boat)) return "overdue"; if (boat.availability === "available" && (boat.batteryServiceStatus !== "ready" || boat.batteryHealth === "unknown" || !batteryReadingIsFresh(boat))) return "battery-unverified"; if (boat.availability === "available" && ["red", "critical"].includes(boat.batteryHealth)) return "battery-low"; if (boat.availability === "available" || (boat.mooring === "Tied Up at Dock" && !boat.timeOut)) return "available"; return "rented"; }
 function dueDisplay(boat) { if (boat.actualReturn || ["available", "maintenance"].includes(boat.availability)) return { primary: "—", secondary: "No active rental", warning: false }; const due = fixedDue(boat); if (due) { const deltaMinutes = Math.round((Date.now() - due.getTime()) / 60000); return { primary: formatTime(due, true), secondary: deltaMinutes > 0 && !boat.actualReturn ? `+${deltaMinutes} min late` : `${boat.rentalMinutes} min rental`, warning: deltaMinutes > 0 && !boat.actualReturn }; } const estimate = vectorEstimate(boat); if (estimate) return { primary: formatTime(estimate.due, true), secondary: `Vector ETA · ${estimate.minutes.toFixed(0)} min`, warning: false }; return { primary: "Calculating…", secondary: "Needs return vector", warning: false }; }
-function alertsFor(boat) { const alerts = []; const due = fixedDue(boat); if (due && !boat.actualReturn && due < new Date()) alerts.push({ critical: true, message: `${boat.name} is ${Math.max(1, Math.round((Date.now() - due) / 60000))} minutes overdue.` }); if (boat.lowBattery || (boat.batteryMv && boat.batteryMv <= 4200)) alerts.push({ critical: true, message: `${boat.name} battery is low at ${(boat.batteryMv / 1000).toFixed(2)} V.` }); if (isOutsideZone(boat)) alerts.push({ critical: true, message: `${boat.name} is outside the Lake Union operating zone.` }); if (!boat.gpsFix) alerts.push({ critical: false, message: `${boat.name} does not have a valid GPS fix.` }); if (boat.timestamp && Date.now() - boat.timestamp.getTime() > STALE_AFTER_MINUTES * 60000) alerts.push({ critical: false, message: `${boat.name} telemetry is stale (${formatTime(boat.timestamp)}).` }); return alerts; }
+function alertsFor(boat) { const alerts = []; const due = fixedDue(boat); if (due && !boat.actualReturn && due < new Date()) alerts.push({ critical: true, message: `${boat.name} is ${Math.max(1, Math.round((Date.now() - due) / 60000))} minutes overdue.` }); if (["red", "critical"].includes(boat.batteryHealth)) alerts.push({ critical: true, message: `${boat.name} battery is ${boat.batteryHealth} at ${(boat.batteryMv / 1000).toFixed(2)} V.` }); if (boat.batteryHealth === "unknown") alerts.push({ critical: false, message: `${boat.name} needs a verified battery reading.` }); if (isOutsideZone(boat)) alerts.push({ critical: true, message: `${boat.name} is outside the Lake Union operating zone.` }); if (!boat.gpsFix) alerts.push({ critical: false, message: `${boat.name} does not have a valid GPS fix.` }); if (boat.timestamp && Date.now() - boat.timestamp.getTime() > STALE_AFTER_MINUTES * 60000) alerts.push({ critical: false, message: `${boat.name} telemetry is stale (${formatTime(boat.timestamp)}).` }); return alerts; }
 
 function formatVariance(boat) { return boat.mooringValid && boat.variance != null ? `σ² ${boat.variance.toFixed(5)}` : "Not evaluated"; }
 function markerPopup(boat) {
     const content = document.createElement("div");
     const name = document.createElement("strong");
     name.textContent = boat.name;
-    content.append(name, document.createElement("br"), boat.mooring, document.createElement("br"), `${(boat.batteryMv / 1000).toFixed(2)} V · ${formatVariance(boat)}`);
+    content.append(name, document.createElement("br"), boat.mooring, document.createElement("br"), `${batteryLabel(boat).split(",")[0]} battery · ${formatVariance(boat)}`);
     return content;
 }
 function markerIcon(boat) { const status = operationalState(boat); const critical = alertsFor(boat).some(alert => alert.critical); const markerStatus = critical ? "warning" : status; const bearing = movementBearing(boat); const directionArrow = bearing == null ? "" : `<span class="boat-direction" style="--boat-bearing:${bearing.toFixed(1)}deg" title="Direction of travel"><i data-lucide="navigation-2"></i></span>`; return L.divIcon({ className: "", html: `<div class="boat-marker ${markerStatus}">${directionArrow}<i data-lucide="ship-wheel"></i><span class="boat-label">${escapeHtml(boat.name)}</span></div>`, iconSize: [38, 38], iconAnchor: [19, 19] }); }
@@ -136,11 +141,18 @@ function updateMarkers() {
 }
 
 function badge(status, label) { return `<span class="badge ${status}"><i class="badge-dot"></i>${escapeHtml(label)}</span>`; }
+function batteryVisual(boat, battery) { const label = batteryLabel(boat); return `<span class="battery-visual ${boat.batteryHealth}" role="img" aria-label="Battery ${escapeHtml(label)}" title="Battery ${escapeHtml(label)}"><span class="battery-case"><span class="battery-level" style="width:${battery}%"></span></span><span class="battery-state">${escapeHtml(label.split(",")[0])}</span></span>`; }
 function dockActionContent(boat, status) {
     if (state.isVolunteer) return `<span class="text-xs text-zinc-400 font-medium">Monitor only</span>`;
     if (status === "maintenance") return `<button class="dock-action" type="button" disabled>Unavailable</button>`;
     const isOut = status === "rented" || status === "overdue";
-    return `<button class="dock-action ${isOut ? "check-in" : "check-out"}" type="button" data-action="${isOut ? "check-in" : "check-out"}" data-boat-id="${escapeHtml(boat.id)}" aria-label="${isOut ? "Check in" : "Check out"} ${escapeHtml(boat.name)}"><i data-lucide="${isOut ? "log-in" : "log-out"}" class="h-3 w-3"></i>${isOut ? "Check in" : "Check out"}</button>`;
+    if (isOut) return `<button class="dock-action check-in" type="button" data-action="check-in" data-boat-id="${escapeHtml(boat.id)}" aria-label="Check in ${escapeHtml(boat.name)}"><i data-lucide="log-in" class="h-3 w-3"></i>Check in</button>`;
+    if (status === "charging") return `<button class="dock-action service" type="button" data-action="install-battery" data-boat-id="${escapeHtml(boat.id)}"><i data-lucide="battery-charging" class="h-3 w-3"></i>Installed</button>`;
+    if (status === "verification") return `<button class="dock-action" type="button" disabled><i data-lucide="activity" class="h-3 w-3"></i>Verifying</button>`;
+    const canOverride = state.isAdmin || state.role === "manager";
+    const checkoutDisabled = boat.batteryServiceStatus !== "ready" || boat.batteryHealth === "critical" || boat.batteryHealth === "unknown" || !batteryReadingIsFresh(boat) || (boat.batteryHealth === "red" && !canOverride);
+    const serviceButton = `<button class="dock-action service icon-only" type="button" data-action="start-charging" data-boat-id="${escapeHtml(boat.id)}" title="Mark battery charging" aria-label="Mark ${escapeHtml(boat.name)} battery charging"><i data-lucide="plug-zap" class="h-3 w-3"></i></button>`;
+    return `<span class="dock-actions"><button class="dock-action check-out" type="button" data-action="check-out" data-boat-id="${escapeHtml(boat.id)}" ${checkoutDisabled ? "disabled" : ""} aria-label="Check out ${escapeHtml(boat.name)}"><i data-lucide="log-out" class="h-3 w-3"></i>${boat.batteryHealth === "red" ? "Override" : "Check out"}</button>${serviceButton}</span>`;
 }
 function visibleColumns() { return state.columnOrder.filter(id => !state.hiddenColumns.has(id)).map(id => COLUMN_DEFINITIONS.find(column => column.id === id)); }
 function saveTablePreferences() { localStorage.setItem(TABLE_PREFERENCES_KEY, JSON.stringify({ order: state.columnOrder, hidden: [...state.hiddenColumns], sort: state.sort })); }
@@ -189,7 +201,7 @@ function cellContent(columnId, boat, status, due, battery, availabilityLabel) {
         actualReturn: () => `<span class="data-value">${formatTime(boat.actualReturn, true)}</span>`,
         coordinates: () => `<span class="data-value">${Number.isFinite(boat.latitude) ? boat.latitude.toFixed(5) : "—"}</span><span class="cell-note font-mono">${Number.isFinite(boat.longitude) ? boat.longitude.toFixed(5) : "—"}</span>`,
         mooring: () => `<span class="data-value">${escapeHtml(boat.mooring.replace("Underway / Moving", "Underway").replace(" at Dock", ""))}</span>`,
-        battery: () => `<span class="data-value ${boat.lowBattery ? "text-red-400" : ""}">${(boat.batteryMv / 1000).toFixed(2)} V</span><div class="battery-track"><div class="battery-fill ${boat.lowBattery ? "low" : ""}" style="width:${battery}%"></div></div>`,
+        battery: () => batteryVisual(boat, battery),
         lastUpdate: () => `<span class="data-value">${formatTime(boat.timestamp)}</span><span class="cell-note">Protocol v${boat.protocolVersion ?? "—"}</span>`
     };
     return cells[columnId]();
@@ -247,21 +259,22 @@ function renderTable() {
     const boats = [...state.boats.values()].filter(boat => `${boat.id} ${boat.name}`.toLowerCase().includes(state.search) && (state.status === "all" || operationalState(boat) === state.status)).sort(compareBoats);
     if (!boats.length) { elements.tableBody.innerHTML = `<tr><td colspan="${columns.length}" class="empty-cell">No vessels match the current filters.</td></tr>`; lucide.createIcons(); return; }
     elements.tableBody.innerHTML = boats.map(boat => {
-        const status = operationalState(boat); const due = dueDisplay(boat); const battery = batteryPercent(boat.batteryMv); const hasAlerts = alertsFor(boat).length > 0; const availabilityLabel = status === "overdue" ? "Overdue" : status[0].toUpperCase() + status.slice(1);
+        const status = operationalState(boat); const due = dueDisplay(boat); const battery = batteryPercent(boat.batteryMv); const hasAlerts = alertsFor(boat).length > 0; const availabilityLabels = { overdue: "Overdue", "battery-low": "Battery low", "battery-unverified": "Battery unverified", charging: "Charging", verification: "Verifying" }; const availabilityLabel = availabilityLabels[status] || status[0].toUpperCase() + status.slice(1);
         return `<tr data-boat-id="${escapeHtml(boat.id)}" class="${hasAlerts ? "alert-row" : ""} ${state.selectedId === boat.id ? "selected" : ""}">${columns.map(column => `<td>${cellContent(column.id, boat, status, due, battery, availabilityLabel)}</td>`).join("")}</tr>`;
     }).join("");
     elements.tableBody.querySelectorAll("tr[data-boat-id]").forEach(row => row.addEventListener("click", () => selectBoat(row.dataset.boatId, true)));
     elements.tableBody.querySelectorAll(".dock-action[data-action]").forEach(button => button.addEventListener("click", event => {
         event.stopPropagation();
         if (button.dataset.action === "check-in") checkInFromTable(button.dataset.boatId, button);
-        else openRentalModal(button.dataset.boatId);
+        else if (button.dataset.action === "check-out") openRentalModal(button.dataset.boatId);
+        else openBatteryServiceModal(button.dataset.boatId, button.dataset.action);
     }));
     lucide.createIcons();
 }
 
 function renderAlerts() { const alerts = [...state.boats.values()].flatMap(boat => alertsFor(boat).map(alert => ({ ...alert, boatId: boat.id }))); elements.alertCount.textContent = alerts.length; elements.metrics.alerts.textContent = alerts.length; elements.alertsList.innerHTML = alerts.length ? alerts.map(alert => `<button class="alert-item ${alert.critical ? "critical" : ""}" data-boat-id="${escapeHtml(alert.boatId)}" type="button"><span class="alert-severity"></span><span>${escapeHtml(alert.message)}</span></button>`).join("") : `<p class="no-alerts">No active fleet alerts.</p>`; elements.alertsList.querySelectorAll("button").forEach(button => button.addEventListener("click", () => selectBoat(button.dataset.boatId, true))); }
 function renderMetrics() { const boats = [...state.boats.values()]; elements.metrics.total.textContent = boats.length; elements.metrics.available.textContent = boats.filter(boat => operationalState(boat) === "available").length; elements.metrics.underway.textContent = boats.filter(boat => boat.mooring !== "Tied Up at Dock").length; }
-function renderMapDetail() { const boat = state.boats.get(state.selectedId); if (!boat) { elements.mapDetail.classList.add("hidden"); return; } const due = dueDisplay(boat); const isOverdue = isRentalOverdue(boat); const rescueRequested = state.rescueRequests.has(boat.id); const rescueControl = isOverdue ? `<button class="rescue-button" type="button" data-rescue-boat-id="${escapeHtml(boat.id)}" ${rescueRequested ? "disabled" : ""}>${rescueRequested ? "Rescue request logged" : "Notify Rescue"}</button>` : ""; elements.mapDetail.innerHTML = `<div><p class="eyebrow">Selected vessel</p><h3 class="mt-1 font-semibold">${escapeHtml(boat.name)}</h3></div><div class="map-detail-grid"><div><span>Due / ETA</span><strong>${due.primary}</strong></div><div><span>Battery</span><strong>${(boat.batteryMv / 1000).toFixed(2)} V</strong></div><div><span>Last ping</span><strong>${formatTime(boat.timestamp)}</strong></div></div>${rescueControl}`; elements.mapDetail.querySelector("[data-rescue-boat-id]")?.addEventListener("click", event => { state.rescueRequests.add(event.currentTarget.dataset.rescueBoatId); renderMapDetail(); }); elements.mapDetail.classList.remove("hidden"); }
+function renderMapDetail() { const boat = state.boats.get(state.selectedId); if (!boat) { elements.mapDetail.classList.add("hidden"); return; } const due = dueDisplay(boat); const isOverdue = isRentalOverdue(boat); const rescueRequested = state.rescueRequests.has(boat.id); const rescueControl = isOverdue ? `<button class="rescue-button" type="button" data-rescue-boat-id="${escapeHtml(boat.id)}" ${rescueRequested ? "disabled" : ""}>${rescueRequested ? "Rescue request logged" : "Notify Rescue"}</button>` : ""; elements.mapDetail.innerHTML = `<div><p class="eyebrow">Selected vessel</p><h3 class="mt-1 font-semibold">${escapeHtml(boat.name)}</h3></div><div class="map-detail-grid"><div><span>Due / ETA</span><strong>${due.primary}</strong></div><div><span>Battery</span><strong>${escapeHtml(batteryLabel(boat).split(",")[0])}</strong></div><div><span>Last ping</span><strong>${formatTime(boat.timestamp)}</strong></div></div>${rescueControl}`; elements.mapDetail.querySelector("[data-rescue-boat-id]")?.addEventListener("click", event => { state.rescueRequests.add(event.currentTarget.dataset.rescueBoatId); renderMapDetail(); }); elements.mapDetail.classList.remove("hidden"); }
 function drawRoute(id) { if (state.routeLayer) { state.routeLayer.remove(); state.routeLayer = null; } const boat = state.boats.get(id); if (!boat || !isRentalOverdue(boat)) return; const points = recentHistoryPoints(id); if (points.length < 2) return; state.routeLayer = L.polyline(points.map(point => [point.latitude, point.longitude]), { color: "#ef4444", weight: 3, opacity: .75, dashArray: "4 7" }).addTo(map); }
 function selectBoat(id, pan) { state.selectedId = id; const boat = state.boats.get(id); if (!boat) return; renderTable(); renderMapDetail(); drawRoute(id); if (pan && boat.gpsFix) map.flyTo([boat.latitude, boat.longitude], Math.max(map.getZoom(), 15), { duration: .7 }); }
 function syncHistorySubscriptions() {
@@ -304,23 +317,14 @@ function rentalRecord(boat, checkedOutAt, checkedInAt) {
     };
 }
 
-async function checkOutBoat(boat, renterName, renterType, passengerCount) {
+async function checkOutBoat(boat, renterName, renterType, passengerCount, overrideReason) {
     if (state.demoMode) {
         state.boats.set(boat.id, { ...boat, availability: "rented", trackingEnabled: true, booked: true, bookedBy: renterName, renterType, passengerCount, timeOut: new Date(), actualReturn: null });
         state.histories.set(boat.id, []);
         return;
     }
-    await updateDoc(doc(state.db, "boats", boat.id), {
-        availability_status: "rented",
-        tracking_enabled: true,
-        booked: true,
-        booked_by: renterName,
-        renter_type: renterType,
-        passenger_count: passengerCount,
-        time_out: new Date(),
-        actual_time_back: deleteField(),
-        rental_updated_at: serverTimestamp()
-    });
+    const { functions, functionsModule } = await getFirebase();
+    await functionsModule.httpsCallable(functions, "checkOutBoat")({ boatId: boat.id, renterName, renterType, passengerCount, overrideReason });
 }
 
 // Check-in is the privacy boundary: the journey trail and renter identity are destroyed here.
@@ -372,7 +376,8 @@ function checkoutDetailsAreComplete() {
 }
 
 function updateCheckoutEligibility() {
-    elements.rentalConfirm.disabled = !checkoutDetailsAreComplete();
+    const overrideReason = document.getElementById("batteryOverrideReason");
+    elements.rentalConfirm.disabled = !checkoutDetailsAreComplete() || (overrideReason && !overrideReason.value);
 }
 
 function openRentalModal(boatId) {
@@ -388,6 +393,7 @@ function openRentalModal(boatId) {
          <label><span>Phone number</span><input id="renterPhone" type="tel" maxlength="30" placeholder="(206) 555-0123" autocomplete="tel" inputmode="tel"></label>
         <label><span>Number of passengers</span><input id="renterPassengers" type="number" min="1" max="6" required></label>
         <label class="nda-confirmation"><input id="renterNdaSigned" type="checkbox" required><span>I confirm the renter has signed the NDA.</span></label>
+         ${boat.batteryHealth === "red" ? `<label><span>Manager override reason</span><select id="batteryOverrideReason" required><option value="">Select reason</option><option value="operational-necessity">Operational necessity</option><option value="scheduled-event">Scheduled event</option><option value="service-evaluation">Service evaluation trip</option></select></label>` : ""}
          <div class="privacy-note"><i data-lucide="shield" class="h-4 w-4 shrink-0"></i><span>Location tracking starts now and runs only while the boat is checked out. A successful staff check-in removes the renter name and stored route.</span></div>`;
     elements.rentalBody.querySelectorAll("input, select").forEach(input => input.addEventListener("input", updateCheckoutEligibility));
     document.getElementById("renterType").addEventListener("change", updateCheckoutEligibility);
@@ -397,6 +403,22 @@ function openRentalModal(boatId) {
     elements.rentalModal.classList.remove("hidden");
     lucide.createIcons();
     setTimeout(() => document.getElementById("renterName")?.focus(), 50);
+}
+
+function openBatteryServiceModal(boatId, action) {
+    const boat = state.boats.get(boatId);
+    if (!boat) return;
+    state.pendingAction = { boatId, serviceAction: action };
+    hideRentalMessage();
+    document.getElementById("rentalTitle").textContent = action === "start-charging" ? `Charge ${boat.name}` : `Reinstall ${boat.name} battery`;
+    document.getElementById("rentalEyebrow").textContent = "Battery service";
+    elements.rentalConfirm.querySelector("span").textContent = action === "start-charging" ? "Mark charging" : "Start verification";
+    elements.rentalBody.innerHTML = `<div class="battery-service-summary">${batteryVisual(boat, batteryPercent(boat.batteryMv))}<p>${action === "start-charging" ? "This removes the boat from checkout and closes its current battery cycle." : "Checkout stays blocked until the tracker reports three consecutive green readings."}</p></div>`;
+    elements.rentalConfirm.disabled = false;
+    elements.rentalBackdrop.classList.remove("hidden");
+    elements.rentalModal.classList.remove("hidden");
+    lucide.createIcons();
+    elements.rentalConfirm.focus();
 }
 
 function closeRentalModal() { state.pendingAction = null; elements.rentalBackdrop.classList.add("hidden"); elements.rentalModal.classList.add("hidden"); }
@@ -409,10 +431,32 @@ async function submitRentalAction(event) {
     if (!boat) { closeRentalModal(); return; }
     if (!state.demoMode && !state.isStaff) { showRentalMessage("Sign in with a dock staff account to record rentals."); return; }
 
+    if (state.pendingAction.serviceAction) {
+        elements.rentalConfirm.disabled = true;
+        try {
+            if (state.demoMode) {
+                const status = state.pendingAction.serviceAction === "start-charging" ? "charging" : "verification";
+                state.boats.set(boat.id, { ...boat, batteryServiceStatus: status });
+            } else {
+                const { functions, functionsModule } = await getFirebase();
+                const callableName = state.pendingAction.serviceAction === "start-charging" ? "startBatteryCharging" : "markBatteryInstalled";
+                await functionsModule.httpsCallable(functions, callableName)({ boatId });
+            }
+            closeRentalModal();
+            render();
+        } catch (error) {
+            console.error("Battery service action failed", error);
+            showRentalMessage(error.message || "Unable to update the battery workflow.");
+            elements.rentalConfirm.disabled = false;
+        }
+        return;
+    }
+
     const renterName = document.getElementById("renterName").value.trim();
     const renterType = document.getElementById("renterType").value;
     const passengerCount = Number(document.getElementById("renterPassengers").value);
     const ndaSigned = document.getElementById("renterNdaSigned").checked;
+    const overrideReason = document.getElementById("batteryOverrideReason")?.value.trim();
     if (!renterName) { showRentalMessage("Renter name is required."); return; }
     if (!RENTER_TYPES.includes(renterType)) { showRentalMessage("Select a renter type."); return; }
     if (!Number.isInteger(passengerCount) || passengerCount < 1 || passengerCount > 6) { showRentalMessage("Passengers must be between 1 and 6."); return; }
@@ -420,7 +464,7 @@ async function submitRentalAction(event) {
 
     elements.rentalConfirm.disabled = true;
     try {
-        await checkOutBoat(boat, renterName, renterType, passengerCount);
+        await checkOutBoat(boat, renterName, renterType, passengerCount, overrideReason);
         render();
         if (state.demoMode) closeRentalModal();
         else { showRentalMessage("Boat checked out.", true); setTimeout(closeRentalModal, 600); }

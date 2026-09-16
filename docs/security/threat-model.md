@@ -4,7 +4,7 @@
 
 **Review cadence:** Quarterly and after any new endpoint, data category, identity provider, or trust boundary
 
-**Last reviewed:** 2026-09-12
+**Last reviewed:** 2026-09-15
 
 ## Assets
 
@@ -16,7 +16,11 @@
 
 ## Trust Boundaries
 
-1. Tracker to private ChirpStack uses LoRaWAN security and is deferred until hardware exists.
+1. The selected tracker architecture uses a XIAO SAMD21, NEO-M9N, Wio-SX1262,
+   MicroSD, six-axis IMU, analog battery divider, and four-cell NiCd pack.
+   Tracker-to-ChirpStack communication uses LoRaWAN OTAA. Device provisioning,
+   physical protection, key rotation, and lost-device revocation remain pending
+   before field deployment.
 2. ChirpStack to `telemetryIngest` crosses the public internet and uses a Secret Manager credential, request constraints, replay receipts, and bounded retention.
 3. Browser to Firebase crosses an untrusted client boundary and requires Firebase Auth, role checks, TOTP for mutation, App Check, and Firestore Rules.
 4. Invitation and lifecycle email crosses the Firebase/Gmail SMTP boundary. Role activation requires an administrator invitation, verified matching email, UID binding, and TOTP enrollment; the dedicated Gmail address, app password, and lifecycle encryption key remain in Secret Manager. Notification content is encrypted at rest while queued for bounded retry.
@@ -50,6 +54,13 @@
 - Raw invitation tokens are never stored; deleted accounts lose Auth, MFA, profile subcollections, and linked invitation records.
 - Suspension and deletion notices use encrypted, idempotent lifecycle jobs with a 24-hour retry window; recipient emails and suspension reasons are not logged.
 
-## Deferred Hardware Boundary
+## Hardware Boundary
 
-Device provisioning, physical debug protection, secure boot, signed firmware updates, OTAA key rotation, and lost-device revocation remain out of scope until hardware is selected. They must be reviewed before field deployment.
+The primary hardware classes are selected, but the exact six-axis IMU,
+regulator, voltage-divider values, and wake source remain open. Before field
+deployment, review MicroSD data-at-rest exposure, debug-port protection,
+firmware authenticity and update procedures, OTAA key injection and rotation,
+device inventory, tamper response, and lost-device revocation. MicroSD must not
+become an uncontrolled long-term copy of renter-linked precise location data;
+its retention, overwrite behavior, and physical recovery procedure require a
+documented decision before logging is enabled.

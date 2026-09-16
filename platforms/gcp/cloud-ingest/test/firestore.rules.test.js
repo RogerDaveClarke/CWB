@@ -76,7 +76,7 @@ test('volunteers cannot retrieve documents containing renter identity or precise
   await assertFails(getDocs(collection(volunteerDb, 'boats/70b3d57ed0000001/history')));
 });
 
-test('rental updates require an operations role and TOTP', async () => {
+test('rental updates are server-authoritative even for MFA operations users', async () => {
   const update = { availability_status: 'rented', tracking_enabled: true, booked: true };
   const staffWithoutMfa = authenticatedDb('staff-1', { role: 'staff', functionLevel: 'operations' });
   await assertFails(updateDoc(doc(staffWithoutMfa, 'boats/70b3d57ed0000001'), update));
@@ -86,7 +86,7 @@ test('rental updates require an operations role and TOTP', async () => {
     functionLevel: 'operations',
     firebase: { sign_in_second_factor: 'totp' }
   });
-  await assertSucceeds(updateDoc(doc(staffWithMfa, 'boats/70b3d57ed0000001'), update));
+  await assertFails(updateDoc(doc(staffWithMfa, 'boats/70b3d57ed0000001'), update));
 });
 
 test('users can read only their own profile while MFA admins can list users', async () => {

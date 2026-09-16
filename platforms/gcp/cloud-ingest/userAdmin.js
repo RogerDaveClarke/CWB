@@ -792,6 +792,10 @@ exports.checkInBoat = onCall(CALLABLE_OPTIONS, async (request) => {
       event_id: FieldValue.delete(),
       event_name: FieldValue.delete(),
       actual_time_back: FieldValue.delete(),
+      battery_override_active: FieldValue.delete(),
+      battery_cycle_trip_count: Number(boat.battery_cycle_trip_count || 0) + 1,
+      battery_cycle_operating_minutes: Number(boat.battery_cycle_operating_minutes || 0)
+        + (checkedOutAt ? Math.max(0, Math.round((checkedInAt - checkedOutAt) / 60000)) : 0),
       'last_ping.latitude': FieldValue.delete(),
       'last_ping.longitude': FieldValue.delete(),
       rental_updated_at: FieldValue.serverTimestamp()

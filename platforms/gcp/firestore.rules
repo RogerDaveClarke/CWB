@@ -84,53 +84,14 @@ service cloud.firestore {
       ];
     }
 
-    function rentalKeys() {
-      return [
-        'availability_status',
-        'tracking_enabled',
-        'booked',
-        'booked_by',
-        'renter_type',
-        'passenger_count',
-        'rental_type',
-        'rental_minutes',
-        'time_out',
-        'time_due_back',
-        'actual_time_back',
-        'use_type',
-        'event_id',
-        'event_name',
-        'rental_updated_at'
-      ];
-    }
-
-    function validRentalState() {
-      return request.resource.data.availability_status in ['available', 'rented']
-        && request.resource.data.tracking_enabled is bool
-        && (!('booked_by' in request.resource.data) || request.resource.data.booked_by is string)
-        && (!('renter_type' in request.resource.data) || request.resource.data.renter_type in ['Public', 'Volunteer', 'Dire Hard', 'Libary Pass'])
-        && (!('passenger_count' in request.resource.data) || request.resource.data.passenger_count is int)
-        && (!('use_type' in request.resource.data) || request.resource.data.use_type in ['rental', 'event', 'authorized_use'])
-        && (!('event_id' in request.resource.data) || request.resource.data.event_id is string)
-        && (!('event_name' in request.resource.data) || request.resource.data.event_name is string)
-        // A boat that is not tracking must not retain renter identity.
-        && (request.resource.data.tracking_enabled == true
-            || (!('booked_by' in request.resource.data)
-              && !('renter_type' in request.resource.data)));
-    }
-
     match /boats/{boatId} {
       allow read: if hasOperationsAccess();
       allow create: if isAdmin()
         && request.resource.data.keys().hasOnly(configurationKeys())
         && validBoatConfiguration(boatId);
       allow update: if hasMfaOperationsAccess()
-        && (
-          (request.resource.data.diff(resource.data).affectedKeys().hasOnly(configurationKeys())
-            && validBoatConfiguration(boatId))
-          || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(rentalKeys())
-            && validRentalState())
-        );
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(configurationKeys())
+        && validBoatConfiguration(boatId);
       allow delete: if isAdmin()
         && (!('tracking_enabled' in resource.data)
         || resource.data.tracking_enabled == false);
@@ -183,6 +144,16 @@ service cloud.firestore {
         && request.resource.data.vessel_name is string
         && request.resource.data.duration_minutes is int;
       allow update, delete: if false;
+    }
+
+    match /battery_service_events/{eventId} {
+      allow read: if hasOperationsAccess();
+      allow write: if false;
+    }
+
+    match /battery_cycles/{cycleId} {
+      allow read: if hasOperationsAccess();
+      allow write: if false;
     }
 
     match /event_types/{typeId} {
