@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { randomBytes } = require('node:crypto');
-const { buildIdentityUpdate, hashInvitationValue, invitationReservationId, invitationIsActive, invitationBlocksEmail, invitationMatchesUser, completeImmediateDeletion, assertUsableInvitation, assertInvitationIdentity, validateLifecycleRequest, sendLifecycleEmail, encryptLifecycleMessage, decryptLifecycleMessage, lifecycleJobExpired, lifecycleNotificationExpired } = require('../userAdmin');
+const { buildIdentityUpdate, hashInvitationValue, invitationReservationId, invitationIsActive, invitationBlocksEmail, invitationMatchesUser, completeImmediateDeletion, assertUsableInvitation, assertInvitationIdentity, validateLifecycleRequest, sendLifecycleEmail, encryptLifecycleMessage, decryptLifecycleMessage, lifecycleJobExpired, lifecycleNotificationExpired, waitForTotpEnrollment, reportsActiveMfa } = require('../userAdmin');
 
 test('identity update normalizes a corrected email and resets verification', () => {
   const update = buildIdentityUpdate(
@@ -133,6 +133,51 @@ test('only completed lifecycle jobs may expire before notification delivery', ()
   const expiresAt = { toMillis: () => 1000 };
   assert.equal(lifecycleNotificationExpired({ expiresAt, operationCompleted: false }, 1000), false);
   assert.equal(lifecycleNotificationExpired({ expiresAt, operationCompleted: true }, 1000), true);
+});
+
+test('invitation completion waits for a newly enrolled TOTP factor to propagate', async () => {
+  let reads = 0;
+  let pauses = 0;
+  const userRecord = await waitForTotpEnrollment(
+    'user-1',
+    async () => {
+      reads += 1;
+      return reads < 3
+        ? { multiFactor: { enrolledFactors: [] } }
+        : { multiFactor: { enrolledFactors: [{ factorId: 'totp' }] } };
+    },
+    async () => { pauses += 1; }
+  );
+  assert.equal(reads, 3);
+  assert.equal(pauses, 2);
+  assert.equal(userRecord.multiFactor.enrolledFactors[0].factorId, 'totp');
+});
+
+test('invitation completion fails closed when TOTP propagation never completes', async () => {
+  let reads = 0;
+  let pauses = 0;
+  await assert.rejects(
+    waitForTotpEnrollment(
+      'user-1',
+      async () => {
+        reads += 1;
+        return { multiFactor: { enrolledFactors: [] } };
+      },
+      async () => { pauses += 1; }
+    ),
+    error => error.code === 'failed-precondition'
+  );
+  assert.equal(reads, 6);
+  assert.equal(pauses, 5);
+});
+
+test('admin reports MFA only for fully active accounts', () => {
+  const enrolledUser = { multiFactor: { enrolledFactors: [{ factorId: 'totp' }] } };
+  assert.equal(reportsActiveMfa(enrolledUser, { status: 'active' }, null), true);
+  assert.equal(reportsActiveMfa(enrolledUser, { status: 'pending_mfa' }, { id: 'invite-1' }), false);
+  assert.equal(reportsActiveMfa(enrolledUser, { status: 'active' }, { id: 'invite-1' }), false);
+  assert.equal(reportsActiveMfa({ ...enrolledUser, disabled: true }, { status: 'active' }, null), false);
+  assert.equal(reportsActiveMfa({ multiFactor: { enrolledFactors: [] } }, { status: 'active' }, null), false);
 });
 
 test('account deletion failures reject without entering the notification queue', async () => {

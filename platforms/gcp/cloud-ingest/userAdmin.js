@@ -95,6 +95,23 @@ function lifecycleNotificationExpired(job, now = Date.now()) {
   return job.operationCompleted === true && lifecycleJobExpired(job, now);
 }
 
+function hasTotpFactor(userRecord) {
+  return (userRecord?.multiFactor?.enrolledFactors || []).some(factor => factor.factorId === 'totp');
+}
+
+async function waitForTotpEnrollment(uid, getUser = value => getAuth().getUser(value), pause = delay => new Promise(resolve => setTimeout(resolve, delay))) {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const userRecord = await getUser(uid);
+    if (hasTotpFactor(userRecord)) return userRecord;
+    if (attempt < 5) await pause(500);
+  }
+  throw new HttpsError('failed-precondition', 'Complete authenticator enrollment before activating this invitation.');
+}
+
+function reportsActiveMfa(userRecord, profile, invitationDocument) {
+  return userRecord?.disabled !== true && profile?.status === 'active' && !invitationDocument && hasTotpFactor(userRecord);
+}
+
 async function sendLifecycleEmail({ to, subject, text }, transport, lifecycleJobId = '') {
   const from = GMAIL_SENDER_EMAIL.value();
   const appPassword = GMAIL_APP_PASSWORD.value();
@@ -547,10 +564,7 @@ exports.completeUserInvitation = onCall(CALLABLE_OPTIONS, async (request) => {
   const token = String(request.data?.token || '');
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new HttpsError('failed-precondition', 'This invitation is invalid or has already been used.');
   const invitationRef = db.collection('user_invitations').doc(hashInvitationValue(token));
-  const userRecord = await getAuth().getUser(request.auth.uid);
-  if (!(userRecord.multiFactor?.enrolledFactors || []).some(factor => factor.factorId === 'totp')) {
-    throw new HttpsError('failed-precondition', 'Complete authenticator enrollment before activating this invitation.');
-  }
+  const userRecord = await waitForTotpEnrollment(request.auth.uid);
   const snapshot = await invitationRef.get();
   const invitation = snapshot.exists ? snapshot.data() : null;
   assertUsableInvitation(invitation);
@@ -803,7 +817,7 @@ exports.listUsers = onCall(CALLABLE_OPTIONS, async (request) => {
       displayName: profile.displayName || record.displayName || '',
       address: profile.address || '',
       disabled: suspended,
-      mfaEnrolled: (record.multiFactor?.enrolledFactors || []).length > 0,
+      mfaEnrolled: reportsActiveMfa(record, profile, invitationDocument),
       role: profile.role ?? record.customClaims?.role ?? null,
       functionLevel: profile.functionLevel ?? record.customClaims?.functionLevel ?? null,
       status: suspended ? 'suspended'
@@ -942,3 +956,6 @@ module.exports.encryptLifecycleMessage = encryptLifecycleMessage;
 module.exports.decryptLifecycleMessage = decryptLifecycleMessage;
 module.exports.lifecycleJobExpired = lifecycleJobExpired;
 module.exports.lifecycleNotificationExpired = lifecycleNotificationExpired;
+module.exports.hasTotpFactor = hasTotpFactor;
+module.exports.waitForTotpEnrollment = waitForTotpEnrollment;
+module.exports.reportsActiveMfa = reportsActiveMfa;
