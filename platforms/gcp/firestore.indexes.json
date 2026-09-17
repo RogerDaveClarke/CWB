@@ -1,11 +1,4 @@
 {
   "indexes": [],
-  "fieldOverrides": [
-    {
-      "collectionGroup": "invitation_email_reservations",
-      "fieldPath": "expiresAt",
-      "ttl": true,
-      "indexes": []
-    }
-  ]
+  "fieldOverrides": []
 }

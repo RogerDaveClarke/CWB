@@ -1,7 +1,35 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { randomBytes } = require('node:crypto');
-const { buildIdentityUpdate, hashInvitationValue, invitationReservationId, invitationIsActive, invitationBlocksEmail, invitationMatchesUser, completeImmediateDeletion, assertUsableInvitation, assertInvitationIdentity, validateLifecycleRequest, sendLifecycleEmail, encryptLifecycleMessage, decryptLifecycleMessage, lifecycleJobExpired, lifecycleNotificationExpired, waitForTotpEnrollment, reportsActiveMfa } = require('../userAdmin');
+const userAdmin = require('../userAdmin');
+const { buildIdentityUpdate, hashInvitationValue, invitationReservationId, invitationIsActive, invitationBlocksEmail, invitationMatchesUser, completeImmediateDeletion, assertUsableInvitation, assertInvitationIdentity, validateLifecycleRequest, sendLifecycleEmail, encryptLifecycleMessage, decryptLifecycleMessage, lifecycleJobExpired, lifecycleNotificationExpired, waitForTotpEnrollment, reportsActiveMfa, acceptUserInvitationRequest, completeUserInvitationRequest } = userAdmin;
+
+const INVITATION_TOKEN = 'A'.repeat(43);
+
+function invitationAcceptanceFixture(invitation, userRecord) {
+  const invitationRef = { kind: 'invitation', id: hashInvitationValue(INVITATION_TOKEN) };
+  const userRef = { kind: 'user', id: userRecord.uid };
+  const writes = [];
+  const snapshot = (reference) => reference.kind === 'invitation'
+    ? { exists: true, id: invitationRef.id, data: () => invitation }
+    : { exists: false };
+  return {
+    writes,
+    auth: { async getUser() { return userRecord; } },
+    db: {
+      collection(name) {
+        return { doc(id) { return name === 'user_invitations' ? invitationRef : { ...userRef, id }; } };
+      },
+      async runTransaction(handler) {
+        return handler({
+          async get(reference) { return snapshot(reference); },
+          update(reference, values) { writes.push(['update', reference, values]); },
+          set(reference, values) { writes.push(['set', reference, values]); }
+        });
+      }
+    }
+  };
+}
 
 test('identity update normalizes a corrected email and resets verification', () => {
   const update = buildIdentityUpdate(
@@ -231,4 +259,97 @@ test('reserved invitations merge with the same Auth identity', () => {
 test('pending MFA invitations remain associated with their Auth identity', () => {
   const invitation = { status: 'reserved', reservedUid: 'pending-user', email: 'person@example.org' };
   assert.equal(invitationMatchesUser(invitation, { uid: 'pending-user', email: 'person@example.org' }), true);
+});
+
+test('invitation callable exports reject missing authentication and malformed tokens', async () => {
+  await assert.rejects(
+    userAdmin.acceptUserInvitation.run({ data: { token: INVITATION_TOKEN } }),
+    error => error.code === 'unauthenticated'
+  );
+  await assert.rejects(
+    userAdmin.completeUserInvitation.run({ auth: { uid: 'user-1' }, data: { token: 'short' } }),
+    error => error.code === 'failed-precondition'
+  );
+});
+
+test('invitation acceptance rejects an unverified or mismatched mailbox identity', async () => {
+  const invitation = { email: 'invited@example.org', status: 'pending', expiresAt: Date.now() + 10000 };
+  for (const userRecord of [
+    { uid: 'user-1', email: 'invited@example.org', emailVerified: false },
+    { uid: 'user-1', email: 'other@example.org', emailVerified: true }
+  ]) {
+    const fixture = invitationAcceptanceFixture(invitation, userRecord);
+    await assert.rejects(
+      acceptUserInvitationRequest({ auth: { uid: 'user-1' }, data: { token: INVITATION_TOKEN } }, fixture),
+      error => error.code === 'permission-denied'
+    );
+    assert.equal(fixture.writes.length, 0);
+  }
+});
+
+test('invitation acceptance rejects a competing UID reservation', async () => {
+  const fixture = invitationAcceptanceFixture({
+    email: 'invited@example.org', status: 'reserved', reservedUid: 'other-user',
+    expiresAt: Date.now() + 10000
+  }, { uid: 'user-1', email: 'invited@example.org', emailVerified: true });
+  await assert.rejects(
+    acceptUserInvitationRequest({ auth: { uid: 'user-1' }, data: { token: INVITATION_TOKEN } }, fixture),
+    error => error.code === 'failed-precondition'
+  );
+  assert.equal(fixture.writes.length, 0);
+});
+
+test('invitation acceptance reserves the verified identity and creates its pending profile', async () => {
+  const fixture = invitationAcceptanceFixture({
+    email: 'invited@example.org', displayName: 'Invited User', status: 'pending',
+    expiresAt: Date.now() + 10000
+  }, { uid: 'user-1', email: 'invited@example.org', emailVerified: true });
+  const result = await acceptUserInvitationRequest(
+    { auth: { uid: 'user-1' }, data: { token: INVITATION_TOKEN } },
+    fixture
+  );
+  assert.deepEqual(result, { accepted: true, email: 'invited@example.org' });
+  assert.equal(fixture.writes.filter(([operation]) => operation === 'update').length, 1);
+  assert.equal(fixture.writes.filter(([operation]) => operation === 'set').length, 1);
+});
+
+test('invitation completion fails before persistence when TOTP is absent', async () => {
+  await assert.rejects(
+    completeUserInvitationRequest(
+      { auth: { uid: 'user-1' }, data: { token: INVITATION_TOKEN } },
+      { waitForTotpEnrollment: async () => { throw Object.assign(new Error('No TOTP'), { code: 'failed-precondition' }); } }
+    ),
+    error => error.code === 'failed-precondition'
+  );
+});
+
+test('invitation completion clears claims when profile activation fails', async () => {
+  const invitation = {
+    email: 'invited@example.org', status: 'reserved', reservedUid: 'user-1', role: 'staff',
+    functionLevel: 'operations', expiresAt: Date.now() + 10000
+  };
+  const clearedClaims = [];
+  const invitationRef = { async get() { return { exists: true, data: () => invitation }; } };
+  await assert.rejects(
+    completeUserInvitationRequest(
+      { auth: { uid: 'user-1' }, data: { token: INVITATION_TOKEN } },
+      {
+        db: {
+          collection() { return { doc() { return invitationRef; } }; },
+          async runTransaction() { throw new Error('activation write failed'); }
+        },
+        auth: {
+          async setCustomUserClaims(uid, claims) { clearedClaims.push([uid, claims]); },
+          async revokeRefreshTokens() { throw new Error('must not revoke after failed activation'); }
+        },
+        waitForTotpEnrollment: async () => ({
+          uid: 'user-1', email: 'invited@example.org', emailVerified: true,
+          multiFactor: { enrolledFactors: [{ factorId: 'totp' }] }
+        }),
+        applyClaims: async () => {}
+      }
+    ),
+    /activation write failed/
+  );
+  assert.deepEqual(clearedClaims, [['user-1', {}]]);
 });

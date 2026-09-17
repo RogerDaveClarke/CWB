@@ -46,7 +46,7 @@
 
 - No GCP HTTP/callable export exists outside `tools/security-gate/gcp-endpoints.json`.
 - No operational Firestore collection permits anonymous or unassigned-account access.
-- Browser callables enforce App Check; ChirpStack uses its separate machine credential.
+- Browser callables enforce App Check except invitation acceptance and completion. Those capacity-capped endpoints are reached only after Firebase verifies mailbox control, require a high-entropy one-time invitation token and matching UID, and require an enrolled TOTP factor before completion. ChirpStack uses its separate machine credential.
 - No production workload runs as a default service account or receives `Editor`/`Owner`.
 - The default Compute identity is restricted to the Cloud Build builder role and is never a runtime identity.
 - GPS history is erased at check-in and is never retained longer than 48 hours.

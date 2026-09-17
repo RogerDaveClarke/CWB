@@ -8,6 +8,7 @@ Project: `cwb-boat-operations-c50dd`; primary region: `us-west1`.
 - The default Compute identity is build-only with `roles/cloudbuild.builds.builder`; it has no `Editor` role and is not used at runtime.
 - Secret-level access only for the consuming telemetry, boat-configuration, and account-administration identities.
 - Firebase App Check uses a score-based reCAPTCHA Enterprise key restricted to the Firebase Hosting domains.
+- Invitation acceptance and completion are the only App Check exceptions because mailbox recipients may use browsers that cannot complete reCAPTCHA attestation. Firebase verifies mailbox control before either endpoint is called; both are capacity-capped and retain one-time token, verified-email/UID, and TOTP controls.
 - Data Read and Data Write audit logs are enabled for all services.
 - `security-alert-policy.json` monitors rejected calls, unknown devices, control changes, and purge failures.
 - GPS history has a 48-hour scheduled deletion backstop.

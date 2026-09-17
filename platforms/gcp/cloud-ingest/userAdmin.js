@@ -27,6 +27,12 @@ const CALLABLE_OPTIONS = {
   enforceAppCheck: true,
   serviceAccount: 'cwb-user-admin@cwb-boat-operations-c50dd.iam.gserviceaccount.com'
 };
+const INVITATION_CALLABLE_OPTIONS = {
+  ...CALLABLE_OPTIONS,
+  enforceAppCheck: false,
+  maxInstances: 5,
+  concurrency: 20
+};
 const LIFECYCLE_CALLABLE_OPTIONS = {
   ...CALLABLE_OPTIONS,
   secrets: [GMAIL_SENDER_EMAIL, GMAIL_APP_PASSWORD, LIFECYCLE_NOTIFICATION_KEY]
@@ -519,23 +525,17 @@ exports.cancelUserInvitation = onCall(CALLABLE_OPTIONS, async (request) => {
   return { cancelled: true };
 });
 
-exports.validateUserInvitation = onCall({ ...CALLABLE_OPTIONS, maxInstances: 5, concurrency: 20 }, async (request) => {
-  const token = String(request.data?.token || '');
-  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new HttpsError('failed-precondition', 'This invitation is invalid or has already been used.');
-  const snapshot = await db.collection('user_invitations').doc(hashInvitationValue(token)).get();
-  assertUsableInvitation(snapshot.exists ? snapshot.data() : null);
-  return { valid: true };
-});
-
-exports.acceptUserInvitation = onCall(CALLABLE_OPTIONS, async (request) => {
+async function acceptUserInvitationRequest(request, dependencies = {}) {
   requireAuthenticatedUser(request);
   const token = String(request.data?.token || '');
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new HttpsError('failed-precondition', 'This invitation is invalid or has already been used.');
-  const invitationRef = db.collection('user_invitations').doc(hashInvitationValue(token));
-  const userRecord = await getAuth().getUser(request.auth.uid);
-  const userRef = db.collection('users').doc(request.auth.uid);
+  const firestore = dependencies.db || db;
+  const auth = dependencies.auth || getAuth();
+  const invitationRef = firestore.collection('user_invitations').doc(hashInvitationValue(token));
+  const userRecord = await auth.getUser(request.auth.uid);
+  const userRef = firestore.collection('users').doc(request.auth.uid);
 
-  const invitation = await db.runTransaction(async transaction => {
+  const invitation = await firestore.runTransaction(async transaction => {
     const [snapshot, userSnapshot] = await Promise.all([
       transaction.get(invitationRef), transaction.get(userRef)
     ]);
@@ -557,14 +557,18 @@ exports.acceptUserInvitation = onCall(CALLABLE_OPTIONS, async (request) => {
     return data;
   });
   return { accepted: true, email: invitation.email };
-});
+}
 
-exports.completeUserInvitation = onCall(CALLABLE_OPTIONS, async (request) => {
+async function completeUserInvitationRequest(request, dependencies = {}) {
   requireAuthenticatedUser(request);
   const token = String(request.data?.token || '');
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new HttpsError('failed-precondition', 'This invitation is invalid or has already been used.');
-  const invitationRef = db.collection('user_invitations').doc(hashInvitationValue(token));
-  const userRecord = await waitForTotpEnrollment(request.auth.uid);
+  const firestore = dependencies.db || db;
+  const auth = dependencies.auth || getAuth();
+  const waitForTotp = dependencies.waitForTotpEnrollment || waitForTotpEnrollment;
+  const applyUserClaims = dependencies.applyClaims || applyClaims;
+  const invitationRef = firestore.collection('user_invitations').doc(hashInvitationValue(token));
+  const userRecord = await waitForTotp(request.auth.uid);
   const snapshot = await invitationRef.get();
   const invitation = snapshot.exists ? snapshot.data() : null;
   assertUsableInvitation(invitation);
@@ -573,30 +577,39 @@ exports.completeUserInvitation = onCall(CALLABLE_OPTIONS, async (request) => {
     throw new HttpsError('failed-precondition', 'This invitation is invalid or has already been used.');
   }
 
-  await applyClaims(request.auth.uid, invitation.role, invitation.functionLevel, false);
+  await applyUserClaims(request.auth.uid, invitation.role, invitation.functionLevel, false);
   try {
-    await db.runTransaction(async transaction => {
+    await firestore.runTransaction(async transaction => {
       const current = await transaction.get(invitationRef);
       const data = current.exists ? current.data() : null;
       assertUsableInvitation(data);
       assertInvitationIdentity(data, userRecord);
       if (data.status !== 'reserved') throw new HttpsError('failed-precondition', 'This invitation is invalid or has already been used.');
-      transaction.set(db.collection('users').doc(request.auth.uid), {
+      transaction.set(firestore.collection('users').doc(request.auth.uid), {
         email: data.email, displayName: data.displayName || userRecord.displayName || '',
         address: data.address || '', role: data.role, functionLevel: data.functionLevel,
         status: 'active', mfaEnrolled: true, invitationId: FieldValue.delete(),
         updatedAt: FieldValue.serverTimestamp()
       }, { merge: true });
       transaction.delete(invitationRef);
-      transaction.delete(db.collection('invitation_email_reservations').doc(invitationReservationId(data.email)));
+      transaction.delete(firestore.collection('invitation_email_reservations').doc(invitationReservationId(data.email)));
     });
   } catch (error) {
-    await getAuth().setCustomUserClaims(request.auth.uid, {});
+    await auth.setCustomUserClaims(request.auth.uid, {});
     throw error;
   }
-  await getAuth().revokeRefreshTokens(request.auth.uid);
+  await auth.revokeRefreshTokens(request.auth.uid);
   logSecurityEvent('user_invitation_completed', { actor: pseudonymousId(request.auth.uid) });
   return { activated: true };
+}
+
+exports.acceptUserInvitation = onCall(INVITATION_CALLABLE_OPTIONS, async request => {
+  requireAuthenticatedUser(request);
+  return acceptUserInvitationRequest(request);
+});
+exports.completeUserInvitation = onCall(INVITATION_CALLABLE_OPTIONS, async request => {
+  requireAuthenticatedUser(request);
+  return completeUserInvitationRequest(request);
 });
 
 // Update an existing user's identity, profile, and access settings.
@@ -959,3 +972,5 @@ module.exports.lifecycleNotificationExpired = lifecycleNotificationExpired;
 module.exports.hasTotpFactor = hasTotpFactor;
 module.exports.waitForTotpEnrollment = waitForTotpEnrollment;
 module.exports.reportsActiveMfa = reportsActiveMfa;
+module.exports.acceptUserInvitationRequest = acceptUserInvitationRequest;
+module.exports.completeUserInvitationRequest = completeUserInvitationRequest;

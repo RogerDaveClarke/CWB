@@ -42,6 +42,22 @@ function isReauthenticationLink() {
     return new URLSearchParams(window.location.hash.slice(1)).get("reauth") === "1";
 }
 
+function invitationFailureMessage(error, stage) {
+    if (stage === "acceptance" && error?.code === "functions/failed-precondition") {
+        return "This invitation link is expired, already used, or was replaced. Open the newest invitation email or ask an administrator to resend it.";
+    }
+    if (stage === "sign-in" && ["auth/invalid-action-code", "auth/expired-action-code"].includes(error?.code)) {
+        return "This email verification link is expired or already used. Ask an administrator to resend the invitation.";
+    }
+    if (stage === "sign-in" && ["auth/invalid-email", "auth/user-mismatch"].includes(error?.code)) {
+        return "Enter the exact email address that received this invitation.";
+    }
+    if (error?.code === "functions/unauthenticated") {
+        return "Browser verification failed. Refresh this page and open the newest invitation link again.";
+    }
+    return "This invitation could not be verified. Confirm the invited email address or ask a CWB administrator for a new invitation.";
+}
+
 async function callFunction(name, data) {
     const { functions, functionsModule } = await getFirebase();
     return functionsModule.httpsCallable(functions, name)(data);
@@ -212,11 +228,12 @@ async function init() {
             event.preventDefault();
             inviteMessage.textContent = "";
             acceptInviteButton.disabled = true;
+            let verificationStage = "sign-in";
             try {
-                if (token) await callFunction("validateUserInvitation", { token });
                 const result = await authModule.signInWithEmailLink(auth, inviteEmail.value.trim(), window.location.href);
                 const isNewUser = authModule.getAdditionalUserInfo(result)?.isNewUser === true;
                 if (token) {
+                    verificationStage = "acceptance";
                     try {
                         await callFunction("acceptUserInvitation", { token });
                     } catch (error) {
@@ -229,7 +246,7 @@ async function init() {
                 await startEnrollment(result.user);
             } catch (error) {
                 console.error("Invitation sign-in failed", error.code);
-                inviteMessage.textContent = "This invitation could not be verified. Confirm the invited email address or ask a CWB administrator for a new invitation.";
+                inviteMessage.textContent = invitationFailureMessage(error, verificationStage);
             } finally {
                 acceptInviteButton.disabled = false;
             }

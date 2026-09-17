@@ -1,7 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createHash } = require('node:crypto');
-const { deleteExpiredBatteryEventBatch, deleteExpiredInvitationBatch, retentionCutoff } = require('../retention');
+const {
+  deleteExpiredBatteryEventBatch,
+  deleteExpiredInvitationBatch,
+  deleteOrphanInvitationReservationBatch,
+  retentionCutoff
+} = require('../retention');
 
 test('GPS trail retention cutoff is exactly two days', () => {
   const now = Date.UTC(2026, 8, 10, 12, 0, 0);
@@ -80,4 +85,50 @@ test('invitation retention deletes only the reservation for the same invitation 
     references.first.path,
     references.second.path
   ].sort());
+});
+
+test('reservation retention deletes orphans but preserves a renewed generation', async () => {
+  const now = { toMillis: () => 2000 };
+  const expiredAt = { toMillis: () => 1000 };
+  const futureAt = { toMillis: () => 3000 };
+  const reservationId = email => createHash('sha256').update(`email:${email}`).digest('hex');
+  const references = {
+    orphan: { id: reservationId('orphan@example.org'), path: `invitation_email_reservations/${reservationId('orphan@example.org')}` },
+    renewed: { id: reservationId('renewed@example.org'), path: `invitation_email_reservations/${reservationId('renewed@example.org')}` },
+    oldInvitation: { id: 'old-invite', path: 'user_invitations/old-invite' },
+    newInvitation: { id: 'new-invite', path: 'user_invitations/new-invite' }
+  };
+  const dataByPath = new Map([
+    [references.orphan.path, { invitationId: 'missing-invite', expiresAt: expiredAt }],
+    [references.renewed.path, { invitationId: 'new-invite', expiresAt: futureAt }],
+    [references.newInvitation.path, { email: 'renewed@example.org', expiresAt: futureAt }]
+  ]);
+  const snapshotFor = reference => ({
+    exists: dataByPath.has(reference.path), ref: reference, id: reference.id,
+    get(field) { return dataByPath.get(reference.path)?.[field]; }
+  });
+  const query = {
+    where(field, operator, value) {
+      assert.equal(field, 'expiresAt'); assert.equal(operator, '<'); assert.equal(value, now); return this;
+    },
+    limit(value) { assert.equal(value, 200); return this; },
+    async get() { return { empty: false, docs: [snapshotFor(references.orphan), snapshotFor(references.renewed)] }; }
+  };
+  const deleted = [];
+  const db = {
+    collection(name) {
+      if (name === 'invitation_email_reservations') return query;
+      assert.equal(name, 'user_invitations');
+      return { doc(id) { return references[id === 'new-invite' ? 'newInvitation' : 'oldInvitation']; } };
+    },
+    async runTransaction(handler) {
+      return handler({
+        async get(reference) { return snapshotFor(reference); },
+        delete(reference) { deleted.push(reference.path); }
+      });
+    }
+  };
+
+  assert.equal(await deleteOrphanInvitationReservationBatch(db, now), 1);
+  assert.deepEqual(deleted, [references.orphan.path]);
 });

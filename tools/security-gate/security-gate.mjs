@@ -49,6 +49,17 @@ for (const risk of assurance.acceptedRisks || []) {
 }
 const expected = new Map(policy.endpoints.map((endpoint) => [endpoint.name, endpoint]));
 if (expected.size !== policy.endpoints.length) failures.push('Endpoint policy contains duplicate names.');
+const invitationAppCheckExceptions = new Set([
+  'acceptUserInvitation',
+  'completeUserInvitation'
+]);
+const invitationOptionsSource = readFileSync(join(FUNCTIONS_DIR, 'userAdmin.js'), 'utf8')
+  .match(/const INVITATION_CALLABLE_OPTIONS\s*=\s*\{([\s\S]*?)\};/)?.[1] || '';
+if (!/\benforceAppCheck\s*:\s*false\b/.test(invitationOptionsSource)
+    || !/\bmaxInstances\s*:\s*5\b/.test(invitationOptionsSource)
+    || !/\bconcurrency\s*:\s*20\b/.test(invitationOptionsSource)) {
+  failures.push('Invitation App Check exceptions must use maxInstances 5 and concurrency 20.');
+}
 
 const discovered = new Map();
 const declaration = /exports\.(\w+)\s*=\s*(onCall|onRequest|onSchedule)\s*\(/g;
@@ -115,11 +126,23 @@ for (const name of expected.keys()) {
 }
 
 for (const endpoint of exported.values()) {
-  if (endpoint.trigger === 'onCall'
-      && !endpoint.implementation.includes('CALLABLE_OPTIONS')
+  if (endpoint.trigger !== 'onCall') continue;
+  const rule = expected.get(endpoint.name);
+  if (rule?.appCheck === false) {
+    if (!invitationAppCheckExceptions.has(endpoint.name)
+        || !new RegExp(`^exports\\.${endpoint.name}\\s*=\\s*onCall\\(INVITATION_CALLABLE_OPTIONS,`).test(endpoint.implementation)) {
+      failures.push(`${endpoint.name} does not use the approved invitation App Check exception.`);
+    }
+  } else if (endpoint.implementation.includes('INVITATION_CALLABLE_OPTIONS')) {
+    failures.push(`${endpoint.name} is not approved to bypass Firebase App Check.`);
+  } else if (!endpoint.implementation.includes('CALLABLE_OPTIONS')
       && !endpoint.implementation.includes('enforceAppCheck: true')) {
     failures.push(`${endpoint.name} does not enforce Firebase App Check.`);
   }
+}
+
+for (const name of invitationAppCheckExceptions) {
+  if (expected.get(name)?.appCheck !== false) failures.push(`Invitation App Check exception is not classified: ${name}`);
 }
 
 const webhookSource = read('platforms/gcp/cloud-ingest/index.js');

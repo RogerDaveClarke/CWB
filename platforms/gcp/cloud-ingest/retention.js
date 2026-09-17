@@ -78,6 +78,36 @@ async function deleteExpiredInvitationBatch(db, now = Timestamp.now(), auth = ge
   return deleted;
 }
 
+async function deleteOrphanInvitationReservationBatch(db, now = Timestamp.now()) {
+  const snapshot = await db.collection('invitation_email_reservations')
+    .where('expiresAt', '<', now)
+    .limit(DELETE_BATCH_SIZE)
+    .get();
+  if (snapshot.empty) return 0;
+
+  let deleted = 0;
+  for (const document of snapshot.docs) {
+    const removed = await db.runTransaction(async transaction => {
+      const reservation = await transaction.get(document.ref);
+      if (!reservation.exists || reservation.get('expiresAt')?.toMillis?.() >= now.toMillis()) return false;
+      const invitationId = String(reservation.get('invitationId') || '');
+      const invitationRef = db.collection('user_invitations').doc(invitationId || 'invalid');
+      const invitation = await transaction.get(invitationRef);
+      const invitationExpiresAt = invitation.get('expiresAt')?.toMillis?.() ?? 0;
+      const invitationEmail = String(invitation.get('email') || '').trim().toLowerCase();
+      const expectedReservationId = invitationEmail
+        ? createHash('sha256').update(`email:${invitationEmail}`).digest('hex')
+        : '';
+      if (invitation.exists && invitationExpiresAt >= now.toMillis()
+          && expectedReservationId === document.id) return false;
+      transaction.delete(document.ref);
+      return true;
+    });
+    if (removed) deleted += 1;
+  }
+  return deleted;
+}
+
 async function deleteExpiredBatteryEventBatch(db, now = Timestamp.now()) {
   const snapshot = await db.collection('battery_service_events')
     .where('expires_at', '<', now)
@@ -122,7 +152,12 @@ exports.purgeExpiredInvitations = onSchedule({
     batchSize = await deleteExpiredInvitationBatch(db);
     deleted += batchSize;
   } while (batchSize === DELETE_BATCH_SIZE);
-  console.log(JSON.stringify({ securityEvent: 'invitation_retention_purge', deleted }));
+  let reservationsDeleted = 0;
+  do {
+    batchSize = await deleteOrphanInvitationReservationBatch(db);
+    reservationsDeleted += batchSize;
+  } while (batchSize === DELETE_BATCH_SIZE);
+  console.log(JSON.stringify({ securityEvent: 'invitation_retention_purge', deleted, reservationsDeleted }));
 });
 
 exports.purgeExpiredBatteryEvents = onSchedule({
@@ -144,4 +179,5 @@ exports.purgeExpiredBatteryEvents = onSchedule({
 module.exports.retentionCutoff = retentionCutoff;
 module.exports.deleteExpiredTrailBatch = deleteExpiredTrailBatch;
 module.exports.deleteExpiredInvitationBatch = deleteExpiredInvitationBatch;
+module.exports.deleteOrphanInvitationReservationBatch = deleteOrphanInvitationReservationBatch;
 module.exports.deleteExpiredBatteryEventBatch = deleteExpiredBatteryEventBatch;
