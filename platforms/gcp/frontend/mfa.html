@@ -110,6 +110,19 @@
             font-size: 13px;
             line-height: 1.5;
         }
+        #inviteEmail {
+            width: 100%;
+            min-height: 42px;
+            padding: 9px 11px;
+            border: 1px solid #a1a1aa;
+            border-radius: 5px;
+            outline: 0;
+            font-size: 14px;
+        }
+        #inviteEmail:focus {
+            border-color: #0284c7;
+            box-shadow: 0 0 0 3px rgb(2 132 199 / 0.2);
+        }
         .step-badge {
             display: inline-flex;
             align-items: center;
@@ -303,7 +316,7 @@
                             
                             <div class="flex flex-col sm:flex-row items-center gap-4 mt-3 p-3 bg-white border border-zinc-200 rounded-lg">
                                 <div id="qrBox" class="p-2 bg-white rounded-md flex-shrink-0">
-                                    <!-- QR rendered here -->
+                                    <img id="qrImage" class="hidden rounded block" alt="Scan with your authenticator app" width="160" height="160">
                                 </div>
                                 <div class="min-w-0 flex-1 space-y-2 text-left">
                                     <span class="text-[11px] font-semibold uppercase text-zinc-600 tracking-wider">Cannot scan? Manual setup key:</span>

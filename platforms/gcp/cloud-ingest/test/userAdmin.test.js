@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { randomBytes } = require('node:crypto');
-const { buildIdentityUpdate, hashInvitationValue, assertUsableInvitation, assertInvitationIdentity, validateLifecycleRequest, sendLifecycleEmail, encryptLifecycleMessage, decryptLifecycleMessage, lifecycleJobExpired } = require('../userAdmin');
+const { buildIdentityUpdate, hashInvitationValue, invitationReservationId, invitationIsActive, invitationBlocksEmail, invitationMatchesUser, completeImmediateDeletion, assertUsableInvitation, assertInvitationIdentity, validateLifecycleRequest, sendLifecycleEmail, encryptLifecycleMessage, decryptLifecycleMessage, lifecycleJobExpired, lifecycleNotificationExpired } = require('../userAdmin');
 
 test('identity update normalizes a corrected email and resets verification', () => {
   const update = buildIdentityUpdate(
@@ -39,6 +39,19 @@ test('identity update rejects a missing email', () => {
 
 test('invitation tokens are stored as deterministic hashes', () => {
   assert.equal(hashInvitationValue('invite-token'), 'f9e3c47d452a8fab2dc56ef07d766534cb2cd31c5f63de7107412acc65daa5b8');
+});
+
+test('invitation reservation identity normalizes email casing and whitespace', () => {
+  assert.equal(invitationReservationId(' Person@Example.org '), invitationReservationId('person@example.org'));
+  assert.notEqual(invitationReservationId('person@example.org'), invitationReservationId('other@example.org'));
+});
+
+test('only unexpired pending or reserved invitations block duplicates', () => {
+  assert.equal(invitationIsActive({ status: 'pending', expiresAt: 2000 }, 1000), true);
+  assert.equal(invitationIsActive({ status: 'reserved', expiresAt: 2000 }, 1000), true);
+  assert.equal(invitationIsActive({ status: 'pending', expiresAt: 1000 }, 1000), false);
+  assert.equal(invitationIsActive({ status: 'consumed', expiresAt: 2000 }, 1000), false);
+  assert.equal(invitationBlocksEmail({ status: 'cancelling', expiresAt: 0 }, 1000), true);
 });
 
 test('invitation rejects expired and consumed records', () => {
@@ -114,4 +127,63 @@ test('lifecycle jobs become ineligible for delivery at expiry', () => {
   const job = { expiresAt: { toMillis: () => 1000 } };
   assert.equal(lifecycleJobExpired(job, 999), false);
   assert.equal(lifecycleJobExpired(job, 1000), true);
+});
+
+test('only completed lifecycle jobs may expire before notification delivery', () => {
+  const expiresAt = { toMillis: () => 1000 };
+  assert.equal(lifecycleNotificationExpired({ expiresAt, operationCompleted: false }, 1000), false);
+  assert.equal(lifecycleNotificationExpired({ expiresAt, operationCompleted: true }, 1000), true);
+});
+
+test('account deletion failures reject without entering the notification queue', async () => {
+  let notificationQueued = false;
+  await assert.rejects(
+    completeImmediateDeletion(
+      { action: 'delete', actorUid: 'admin-1', uid: 'user-1' },
+      async () => { throw new Error('deletion failed'); },
+      async () => { notificationQueued = true; }
+    ),
+    /deletion failed/
+  );
+  assert.equal(notificationQueued, false);
+});
+
+test('successful account deletion queues only a completed notification', async () => {
+  const calls = [];
+  const payload = { action: 'delete', actorUid: 'admin-1', uid: 'user-1' };
+  const result = await completeImmediateDeletion(
+    payload,
+    async value => calls.push(['delete', value]),
+    async (value, operationCompleted) => calls.push(['notify', value, operationCompleted])
+  );
+  assert.deepEqual(calls, [
+    ['delete', payload],
+    ['notify', payload, true]
+  ]);
+  assert.deepEqual(result, {
+    operationCompleted: true,
+    deleted: true,
+    notificationQueued: true,
+    notificationSent: false
+  });
+});
+
+test('reserved invitations merge with the same Auth identity', () => {
+  assert.equal(invitationMatchesUser(
+    { reservedUid: 'user-1', email: 'old@example.org' },
+    { uid: 'user-1', email: 'new@example.org' }
+  ), true);
+  assert.equal(invitationMatchesUser(
+    { email: ' Person@Example.org ' },
+    { uid: 'user-2', email: 'person@example.org' }
+  ), true);
+  assert.equal(invitationMatchesUser(
+    { reservedUid: 'user-3', email: 'other@example.org' },
+    { uid: 'user-2', email: 'person@example.org' }
+  ), false);
+});
+
+test('pending MFA invitations remain associated with their Auth identity', () => {
+  const invitation = { status: 'reserved', reservedUid: 'pending-user', email: 'person@example.org' };
+  assert.equal(invitationMatchesUser(invitation, { uid: 'pending-user', email: 'person@example.org' }), true);
 });

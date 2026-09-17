@@ -8,3 +8,4 @@ node_modules/
 platforms/gcp/frontend/firebase-config.js
 platforms/gcp/.firebase/
 platforms/gcp/firestore-debug.log
+firestore-debug.log

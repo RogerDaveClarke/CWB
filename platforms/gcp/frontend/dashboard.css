@@ -210,3 +210,24 @@ tbody tr.alert-row { box-shadow: inset 3px 0 #ef4444; }
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="file"]):not([type="range"]):not([type="color"]),
+textarea {
+    background: #ffffff !important;
+    color: #18181b !important;
+    -webkit-text-fill-color: #18181b !important;
+    color-scheme: light;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="file"]):not([type="range"]):not([type="color"])::placeholder,
+textarea::placeholder {
+    color: #71717a !important;
+    -webkit-text-fill-color: #71717a !important;
+    opacity: 1;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="file"]):not([type="range"]):not([type="color"]):-webkit-autofill,
+textarea:-webkit-autofill {
+    box-shadow: 0 0 0 1000px #ffffff inset !important;
+    -webkit-text-fill-color: #18181b !important;
+}

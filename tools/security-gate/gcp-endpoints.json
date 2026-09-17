@@ -6,6 +6,7 @@
     { "name": "recordMfaEnrollment", "file": "platforms/gcp/cloud-ingest/userAdmin.js", "trigger": "onCall", "authentication": "firebase-user-app-check", "guard": "requireAuthenticatedUser(request)" },
     { "name": "inviteUser", "file": "platforms/gcp/cloud-ingest/userAdmin.js", "trigger": "onCall", "authentication": "firebase-mfa-admin", "guard": "requireMfaAdmin(request)" },
     { "name": "cancelUserInvitation", "file": "platforms/gcp/cloud-ingest/userAdmin.js", "trigger": "onCall", "authentication": "firebase-mfa-admin", "guard": "requireMfaAdmin(request)" },
+    { "name": "validateUserInvitation", "file": "platforms/gcp/cloud-ingest/userAdmin.js", "trigger": "onCall", "authentication": "firebase-app-check-invitation-token", "guard": null },
     { "name": "acceptUserInvitation", "file": "platforms/gcp/cloud-ingest/userAdmin.js", "trigger": "onCall", "authentication": "firebase-user-app-check", "guard": "requireAuthenticatedUser(request)" },
     { "name": "completeUserInvitation", "file": "platforms/gcp/cloud-ingest/userAdmin.js", "trigger": "onCall", "authentication": "firebase-user-app-check", "guard": "requireAuthenticatedUser(request)" },
     { "name": "updateUserProfile", "file": "platforms/gcp/cloud-ingest/userAdmin.js", "trigger": "onCall", "authentication": "firebase-mfa-admin", "guard": "requireMfaAdmin(request)" },

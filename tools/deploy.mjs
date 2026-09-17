@@ -16,6 +16,11 @@ const gcpDir = join(rootDir, "platforms", "gcp");
 const cloudIngestDir = join(gcpDir, "cloud-ingest");
 
 const deployFunctions = process.argv.includes("--all") || process.argv.includes("--functions");
+const hostingOnly = process.argv.includes("--hosting");
+if (hostingOnly && deployFunctions) {
+    console.error("Error: --hosting cannot be combined with Functions deployment flags.");
+    process.exit(1);
+}
 
 console.log("1. Running Privacy Compliance Gate...");
 try {
@@ -47,6 +52,11 @@ if (!existsSync(join(rootDir, "production.env"))) {
 }
 const env = loadEnv(prodEnvPath);
 
+if (env.FIREBASE_PROJECT_ID !== "cwb-boat-operations-c50dd") {
+    console.error(`Error: Refusing deployment to unexpected Firebase project: ${env.FIREBASE_PROJECT_ID || "(missing)"}`);
+    process.exit(1);
+}
+
 if (!env.FIREBASE_PROJECT_ID || !env.FIREBASE_API_KEY || !env.FIREBASE_APP_CHECK_SITE_KEY) {
     console.error(`Error: Missing FIREBASE_PROJECT_ID, FIREBASE_API_KEY, or FIREBASE_APP_CHECK_SITE_KEY in ${prodEnvPath.replace("../", "")}`);
     process.exit(1);
@@ -71,10 +81,10 @@ writeFileSync(configPath, configContent, "utf8");
 console.log(`   Updated ${configPath}`);
 
 console.log("4. Deploying to Firebase...");
-const targets = deployFunctions ? "hosting,firestore,functions" : "hosting,firestore";
+const targets = hostingOnly ? "hosting" : (deployFunctions ? "hosting,firestore,functions" : "hosting,firestore");
 let deploymentFailed = false;
 try {
-    const deployCmd = `npx --yes firebase-tools@15.30.0 deploy --only ${targets} --force`;
+    const deployCmd = `npx --yes firebase-tools@15.30.0 deploy --project ${env.FIREBASE_PROJECT_ID} --only ${targets} --force`;
     console.log(`   Running: ${deployCmd}`);
     const output = execSync(deployCmd, { cwd: gcpDir, stdio: "inherit" });
     console.log("\nDeployment completed successfully!");

@@ -205,5 +205,9 @@ service cloud.firestore {
     match /lifecycle_notification_outbox/{notificationId} {
       allow read, write: if false;
     }
+
+    match /invitation_email_reservations/{reservationId} {
+      allow read, write: if false;
+    }
   }
 }

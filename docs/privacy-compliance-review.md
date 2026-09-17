@@ -30,7 +30,7 @@ platform, operations dashboard, administration and rental history pages.
 GPS resolution is far finer than the 1,750 ft threshold that makes location
 "precise location information" under RCW 19.373.010(19).
 
-Staff accounts are created only through an MFA-administrator invitation. Suspension revokes claims and sessions, disables sign-in, removes Auth display data, recursively erases the live profile and linked invitations, and leaves only the Auth email and a status-only Firestore tombstone needed to keep the identity blocked. Deletion recursively removes the live profile and subcollections, removes invitations linked by email or UID, and deletes Firebase Auth and enrolled MFA factors. Suspension and deletion notices are held only as AES-256-GCM ciphertext in a retry queue and cannot be delivered after their 24-hour expiry. Successful and observed-expired jobs are deleted immediately; Firestore TTL asynchronously removes other expired records, so exact physical deletion at the expiry instant is not claimed. Security events retain only a one-way pseudonymous actor identifier; backups remain governed by their separately approved retention schedule, so the product must not claim deletion from already-created backups unless that process is verified.
+Staff accounts are created only through an MFA-administrator invitation. Suspension revokes claims and sessions, disables sign-in, removes Auth display data, recursively erases the live profile and linked invitations, and leaves only the Auth email and a status-only Firestore tombstone needed to keep the identity blocked. Deletion is immediate: the callable recursively removes the live profile and subcollections, removes invitations linked by email or UID, and deletes Firebase Auth and enrolled MFA factors before reporting success. Suspension operations may be retried from the encrypted lifecycle queue, while deletion enters that queue only after erasure and only for notification delivery. Notices cannot be delivered after their 24-hour expiry. Security events retain only a one-way pseudonymous actor identifier; backups remain governed by their separately approved retention schedule, so the product must not claim deletion from already-created backups unless that process is verified.
 
 ---
 
@@ -91,7 +91,7 @@ public reads.
 
 ### P002 — Retained log allowlist (currently passing)
 
-`rental_history` is constrained by `hasOnly()` to six non-identifying keys, and
+`rental_history` is constrained by `hasOnly()` to pseudonymous operational fields, and
 updates/deletes are denied. This is good design and the gate now guards it
 against regression.
 

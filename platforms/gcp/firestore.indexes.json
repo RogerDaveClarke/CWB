@@ -2,7 +2,7 @@
   "indexes": [],
   "fieldOverrides": [
     {
-      "collectionGroup": "lifecycle_notification_outbox",
+      "collectionGroup": "invitation_email_reservations",
       "fieldPath": "expiresAt",
       "ttl": true,
       "indexes": []

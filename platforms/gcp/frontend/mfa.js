@@ -12,7 +12,7 @@ const acceptInviteButton = document.getElementById("acceptInviteButton");
 const inviteMessage = document.getElementById("inviteMessage");
 const reauthButton = document.getElementById("reauthButton");
 const reauthMessage = document.getElementById("reauthMessage");
-const qrBox = document.getElementById("qrBox");
+const qrImage = document.getElementById("qrImage");
 const secretKey = document.getElementById("secretKey");
 const copySecretBtn = document.getElementById("copySecretBtn");
 const mfaAccountEmail = document.getElementById("mfaAccountEmail");
@@ -38,6 +38,10 @@ function invitationToken() {
     return new URLSearchParams(window.location.hash.slice(1)).get("invite") || "";
 }
 
+function isReauthenticationLink() {
+    return new URLSearchParams(window.location.hash.slice(1)).get("reauth") === "1";
+}
+
 async function callFunction(name, data) {
     const { functions, functionsModule } = await getFirebase();
     return functionsModule.httpsCallable(functions, name)(data);
@@ -45,17 +49,25 @@ async function callFunction(name, data) {
 
 // Render the MFA seed entirely in-browser so it never reaches a QR service.
 function renderQr(otpauthUrl) {
-    qrBox.replaceChildren();
+    qrImage.classList.add("hidden");
+    const parsedUrl = new URL(otpauthUrl);
+    if (parsedUrl.protocol !== "otpauth:" || parsedUrl.hostname !== "totp") {
+        throw new Error("Invalid authenticator setup URL.");
+    }
     const qr = window.qrcode(0, "M");
-    qr.addData(otpauthUrl);
+    qr.addData(parsedUrl.toString());
     qr.make();
-    const img = document.createElement("img");
-    img.alt = "Scan with your authenticator app";
-    img.width = 160;
-    img.height = 160;
-    img.className = "rounded block";
-    img.src = qr.createDataURL(4, 0);
-    qrBox.appendChild(img);
+    const imageData = qr.createDataURL(4, 0);
+    if (!/^data:image\/gif;base64,[A-Za-z0-9+/=]+$/.test(imageData)) {
+        throw new Error("Invalid authenticator QR image.");
+    }
+    const binary = atob(imageData.slice("data:image/gif;base64,".length));
+    const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
+    const objectUrl = URL.createObjectURL(new Blob([bytes], { type: "image/gif" }));
+    qrImage.addEventListener("load", () => URL.revokeObjectURL(objectUrl), { once: true });
+    qrImage.addEventListener("error", () => URL.revokeObjectURL(objectUrl), { once: true });
+    qrImage.src = objectUrl;
+    qrImage.classList.remove("hidden");
 }
 
 // Auto-format OTP input with clean UX (numbers only, auto-submit on 6 digits)
@@ -80,14 +92,13 @@ function setupCodeInput() {
                 if (window.lucide) window.lucide.createIcons();
             }, 2000);
         } catch {
-            // fallback
-            const textarea = document.createElement("textarea");
-            textarea.value = key;
-            textarea.setAttribute("aria-label", "Manual setup key for clipboard copy");
-            document.body.appendChild(textarea);
-            textarea.select();
+            const selection = window.getSelection();
+            const range = document.createRange();
+            range.selectNodeContents(secretKey);
+            selection.removeAllRanges();
+            selection.addRange(range);
             document.execCommand("copy");
-            document.body.removeChild(textarea);
+            selection.removeAllRanges();
         }
     });
 }
@@ -152,6 +163,11 @@ async function startEnrollment(user) {
         if (error.code === "auth/requires-recent-login") {
             statusEl.textContent = "";
             reauthMessage.textContent = "";
+            const usesGoogle = user.providerData?.some(provider => provider.providerId === "google.com");
+            reauthPanel.dataset.method = usesGoogle ? "google" : "email-link";
+            reauthButton.querySelector("span").textContent = usesGoogle
+                ? "Continue with Google"
+                : "Email a fresh verification link";
             setConnection("", "Security check");
             show(reauthPanel);
             return;
@@ -176,16 +192,41 @@ async function init() {
     const { auth, authModule } = await getFirebase();
     const token = invitationToken();
     if (authModule.isSignInWithEmailLink(auth, window.location.href)) {
+        const reauthenticationLink = isReauthenticationLink();
+        if (!token && !reauthenticationLink) {
+            revealProtectedPage();
+            statusEl.textContent = "This sign-in link is missing its invitation or security-check context.";
+            setConnection("error", "Invalid link");
+            show(signinPanel);
+            return;
+        }
         revealProtectedPage();
-        setConnection("", "Invitation verification");
+        setConnection("", reauthenticationLink ? "Account verification" : "Invitation verification");
+        if (reauthenticationLink) {
+            invitePanel.querySelector("h2").textContent = "Confirm your CWB account";
+            invitePanel.querySelector("p").textContent = "Enter the email address where this security link was delivered.";
+            acceptInviteButton.querySelector("span").textContent = "Verify account";
+        }
         show(invitePanel);
         inviteForm.addEventListener("submit", async event => {
             event.preventDefault();
             inviteMessage.textContent = "";
             acceptInviteButton.disabled = true;
             try {
-                await authModule.signInWithEmailLink(auth, inviteEmail.value.trim(), window.location.href);
-                window.location.replace(`/mfa#invite=${encodeURIComponent(token)}`);
+                if (token) await callFunction("validateUserInvitation", { token });
+                const result = await authModule.signInWithEmailLink(auth, inviteEmail.value.trim(), window.location.href);
+                const isNewUser = authModule.getAdditionalUserInfo(result)?.isNewUser === true;
+                if (token) {
+                    try {
+                        await callFunction("acceptUserInvitation", { token });
+                    } catch (error) {
+                        if (isNewUser) await authModule.deleteUser(result.user).catch(() => null);
+                        else await authModule.signOut(auth).catch(() => null);
+                        throw error;
+                    }
+                }
+                history.replaceState(null, "", token ? `/mfa#invite=${encodeURIComponent(token)}` : "/mfa");
+                await startEnrollment(result.user);
             } catch (error) {
                 console.error("Invitation sign-in failed", error.code);
                 inviteMessage.textContent = "This invitation could not be verified. Confirm the invited email address or ask a CWB administrator for a new invitation.";
@@ -218,6 +259,20 @@ async function init() {
 
         const enrolled = authModule.multiFactor(user).enrolledFactors;
         if (enrolled.length > 0) {
+            if (token) {
+                try {
+                    await callFunction("completeUserInvitation", { token });
+                    await signOut();
+                    window.location.replace("/");
+                    return;
+                } catch (error) {
+                    console.error("Invitation completion retry failed", error.code);
+                    statusEl.textContent = "Your authenticator is enrolled, but account activation could not finish. Retry this invitation link or ask an administrator to cancel and resend it.";
+                    setConnection("error", "Activation incomplete");
+                    show(signinPanel);
+                    return;
+                }
+            }
             statusEl.textContent = `Signed in as ${user.email}`;
             setConnection("live", "2FA Active");
             show(donePanel);
@@ -227,19 +282,30 @@ async function init() {
         reauthButton.onclick = async () => {
             reauthMessage.textContent = "";
             reauthButton.disabled = true;
-            reauthButton.innerHTML = `<i data-lucide="loader-2" class="h-4 w-4 animate-spin"></i><span>Opening Google...</span>`;
+            const useEmailLink = reauthPanel.dataset.method === "email-link";
+            reauthButton.innerHTML = `<i data-lucide="loader-2" class="h-4 w-4 animate-spin"></i><span>${useEmailLink ? "Sending link..." : "Opening Google..."}</span>`;
             if (window.lucide) window.lucide.createIcons();
 
             try {
-                const result = await reauthenticate(user);
-                if (result.ok) {
-                    await startEnrollment(auth.currentUser || user);
+                if (useEmailLink) {
+                    const linkState = new URLSearchParams({ reauth: "1" });
+                    if (token) linkState.set("invite", token);
+                    await authModule.sendSignInLinkToEmail(auth, user.email, {
+                        url: `${window.location.origin}/mfa#${linkState}`,
+                        handleCodeInApp: true
+                    });
+                    reauthMessage.textContent = "A fresh verification link was sent. Open it in this browser to continue to QR setup.";
                 } else {
-                    reauthMessage.textContent = result.error;
+                    const result = await reauthenticate(user);
+                    if (result.ok) await startEnrollment(auth.currentUser || user);
+                    else reauthMessage.textContent = result.error;
                 }
+            } catch (error) {
+                console.error("Account confirmation failed", error.code);
+                reauthMessage.textContent = "Could not send a fresh verification link. Ask a CWB administrator to cancel and resend the invitation.";
             } finally {
                 reauthButton.disabled = false;
-                reauthButton.innerHTML = `<i data-lucide="log-in" class="h-4 w-4"></i><span>Continue with Google</span>`;
+                reauthButton.innerHTML = `<i data-lucide="${useEmailLink ? "mail" : "log-in"}" class="h-4 w-4"></i><span>${useEmailLink ? "Email a fresh verification link" : "Continue with Google"}</span>`;
                 if (window.lucide) window.lucide.createIcons();
             }
         };

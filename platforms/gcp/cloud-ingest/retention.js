@@ -1,6 +1,8 @@
 const { getApps, initializeApp } = require('firebase-admin/app');
+const { getAuth } = require('firebase-admin/auth');
 const { getFirestore, Timestamp } = require('firebase-admin/firestore');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
+const { createHash } = require('node:crypto');
 
 if (!getApps().length) initializeApp();
 
@@ -24,17 +26,56 @@ async function deleteExpiredTrailBatch(db, cutoff) {
   return snapshot.size;
 }
 
-async function deleteExpiredInvitationBatch(db, now = Timestamp.now()) {
+async function deleteExpiredInvitationBatch(db, now = Timestamp.now(), auth = getAuth()) {
   const snapshot = await db.collection('user_invitations')
     .where('expiresAt', '<', now)
     .limit(DELETE_BATCH_SIZE)
     .get();
   if (snapshot.empty) return 0;
 
-  const batch = db.batch();
-  snapshot.docs.forEach((document) => batch.delete(document.ref));
-  await batch.commit();
-  return snapshot.size;
+  let deleted = 0;
+  for (const document of snapshot.docs) {
+    const cleanup = await db.runTransaction(async transaction => {
+      const invitation = await transaction.get(document.ref);
+      if (!invitation.exists || invitation.get('expiresAt')?.toMillis?.() >= now.toMillis()) return null;
+      transaction.update(invitation.ref, { status: 'cancelling' });
+      return {
+        invitationId: invitation.id,
+        email: String(invitation.get('email') || '').trim().toLowerCase(),
+        reservedUid: String(invitation.get('reservedUid') || '')
+      };
+    });
+    if (!cleanup) continue;
+    if (cleanup.reservedUid) {
+      try {
+        await auth.deleteUser(cleanup.reservedUid);
+      } catch (error) {
+        if (error.code !== 'auth/user-not-found') throw error;
+      }
+    }
+    await db.runTransaction(async transaction => {
+      const invitation = await transaction.get(document.ref);
+      const profileRef = cleanup.reservedUid ? db.collection('users').doc(cleanup.reservedUid) : null;
+      const reservationId = cleanup.email
+        ? createHash('sha256').update(`email:${cleanup.email}`).digest('hex')
+        : '';
+      const reservationRef = reservationId
+        ? db.collection('invitation_email_reservations').doc(reservationId)
+        : null;
+      const [profile, reservation] = await Promise.all([
+        profileRef ? transaction.get(profileRef) : Promise.resolve(null),
+        reservationRef ? transaction.get(reservationRef) : Promise.resolve(null)
+      ]);
+      if (profile?.exists && profile.get('status') === 'pending_mfa'
+          && profile.get('invitationId') === cleanup.invitationId) transaction.delete(profileRef);
+      if (invitation.exists && invitation.get('status') === 'cancelling') transaction.delete(invitation.ref);
+      if (reservation?.exists && reservation.get('invitationId') === cleanup.invitationId) {
+        transaction.delete(reservationRef);
+      }
+    });
+    deleted += 1;
+  }
+  return deleted;
 }
 
 async function deleteExpiredBatteryEventBatch(db, now = Timestamp.now()) {

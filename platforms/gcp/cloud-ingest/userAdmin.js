@@ -91,6 +91,10 @@ function lifecycleJobExpired(job, now = Date.now()) {
   return (job.expiresAt?.toMillis?.() || 0) <= now;
 }
 
+function lifecycleNotificationExpired(job, now = Date.now()) {
+  return job.operationCompleted === true && lifecycleJobExpired(job, now);
+}
+
 async function sendLifecycleEmail({ to, subject, text }, transport, lifecycleJobId = '') {
   const from = GMAIL_SENDER_EMAIL.value();
   const appPassword = GMAIL_APP_PASSWORD.value();
@@ -119,12 +123,12 @@ async function sendLifecycleEmail({ to, subject, text }, transport, lifecycleJob
   throw lastError || new Error('Email delivery failed.');
 }
 
-async function queueLifecycleJob(payload) {
+async function queueLifecycleJob(payload, operationCompleted = false) {
   const reference = db.collection('lifecycle_notification_outbox').doc();
   await reference.create({
     ...encryptLifecycleMessage(payload),
     attempts: 0,
-    operationCompleted: false,
+    operationCompleted,
     createdAt: FieldValue.serverTimestamp(),
     expiresAt: Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000),
     nextAttemptAt: Timestamp.fromMillis(Date.now() + 5 * 60 * 1000)
@@ -190,7 +194,8 @@ async function processQueuedLifecycleJob(reference) {
   if (claimed.busy) return { operationCompleted: false, notificationSent: false, busy: true };
   const job = claimed.data;
   let operationCompleted = job.operationCompleted === true;
-  if (lifecycleJobExpired(job)) {
+  if (lifecycleNotificationExpired(job)) {
+    logSecurityEvent('account_notification_expired', {}, 'ERROR');
     await reference.delete();
     return { operationCompleted, notificationSent: false, expired: true };
   }
@@ -206,6 +211,7 @@ async function processQueuedLifecycleJob(reference) {
       });
     }
     if (lifecycleJobExpired(job)) {
+      logSecurityEvent('account_notification_expired', {}, 'ERROR');
       await reference.delete();
       return { operationCompleted, notificationSent: false, expired: true };
     }
@@ -214,34 +220,66 @@ async function processQueuedLifecycleJob(reference) {
     return { operationCompleted: true, notificationSent: true };
   } catch {
     const attempts = Number(job.attempts || 0) + 1;
-    if ((job.expiresAt?.toMillis?.() || 0) <= Date.now()) await reference.delete();
-    else await reference.update({
-      attempts,
-      processingUntil: FieldValue.delete(),
-      nextAttemptAt: Timestamp.fromMillis(Date.now() + 15 * 60 * 1000)
-    });
+    if (operationCompleted && lifecycleJobExpired(job)) {
+      logSecurityEvent('account_notification_expired', {}, 'ERROR');
+      await reference.delete();
+    } else {
+      if (attempts >= 3) logSecurityEvent('account_notification_retrying', { attempts }, 'ERROR');
+      await reference.update({
+        attempts,
+        processingUntil: FieldValue.delete(),
+        nextAttemptAt: Timestamp.fromMillis(Date.now() + 15 * 60 * 1000)
+      });
+    }
     return { operationCompleted, notificationSent: false };
   }
 }
 
+async function completeImmediateDeletion(payload, performOperation = performLifecycleOperation, queueNotification = queueLifecycleJob) {
+  await performOperation(payload);
+  logSecurityEvent('user_deleted', {
+    actor: pseudonymousId(payload.actorUid),
+    target: pseudonymousId(payload.uid)
+  });
+  try {
+    await queueNotification(payload, true);
+    return { operationCompleted: true, deleted: true, notificationQueued: true, notificationSent: false };
+  } catch {
+    logSecurityEvent('account_notification_failed', { target: pseudonymousId(payload.uid), action: 'delete' }, 'ERROR');
+    return { operationCompleted: true, deleted: true, notificationQueued: false, notificationSent: false };
+  }
+}
+
 async function deleteLinkedInvitations(uid, email) {
+  const normalizedEmail = normalizeEmail(email);
   const queries = [
-    db.collection('user_invitations').where('email', '==', email),
+    db.collection('user_invitations').where('email', '==', normalizedEmail),
     db.collection('user_invitations').where('reservedUid', '==', uid),
     db.collection('user_invitations').where('createdBy', '==', uid)
   ];
   const snapshots = await Promise.all(queries.map(query => query.get()));
   const references = new Map();
   snapshots.forEach(snapshot => snapshot.docs.forEach(document => references.set(document.ref.path, document.ref)));
-  if (!references.size) return 0;
-  const batch = db.batch();
-  references.forEach(reference => batch.delete(reference));
-  await batch.commit();
+  const invitationIds = new Set([...references.values()].map(reference => reference.id));
+  const reservationRef = normalizedEmail
+    ? db.collection('invitation_email_reservations').doc(invitationReservationId(normalizedEmail))
+    : null;
+  await db.runTransaction(async transaction => {
+    const reservation = reservationRef ? await transaction.get(reservationRef) : null;
+    references.forEach(reference => transaction.delete(reference));
+    if (reservation?.exists && invitationIds.has(String(reservation.get('invitationId') || ''))) {
+      transaction.delete(reservationRef);
+    }
+  });
   return references.size;
 }
 
 function hashInvitationValue(value) {
   return createHash('sha256').update(value).digest('hex');
+}
+
+function invitationReservationId(email) {
+  return hashInvitationValue(`email:${normalizeEmail(email)}`);
 }
 
 function invitationToken() {
@@ -257,6 +295,24 @@ function assertUsableInvitation(invitation, now = Date.now()) {
   if (!Number.isFinite(expiresAt) || expiresAt <= now) {
     throw new HttpsError('failed-precondition', 'This invitation is invalid or has already been used.');
   }
+}
+
+function invitationIsActive(invitation, now = Date.now()) {
+  if (!invitation || !['pending', 'reserved'].includes(invitation.status)) return false;
+  const expiresAt = invitation.expiresAt?.toMillis?.() ?? Number(invitation.expiresAt);
+  return Number.isFinite(expiresAt) && expiresAt > now;
+}
+
+function invitationBlocksEmail(invitation, now = Date.now()) {
+  if (!invitation || !['pending', 'reserved', 'cancelling'].includes(invitation.status)) return false;
+  const expiresAt = invitation.expiresAt?.toMillis?.() ?? Number(invitation.expiresAt);
+  return invitation.status === 'cancelling' || (Number.isFinite(expiresAt) && expiresAt > now);
+}
+
+function invitationMatchesUser(invitation, userRecord) {
+  return invitation?.reservedUid === userRecord?.uid
+    || (normalizeEmail(invitation?.email) !== ''
+      && normalizeEmail(invitation.email) === normalizeEmail(userRecord?.email));
 }
 
 function assertInvitationIdentity(invitation, userRecord) {
@@ -358,30 +414,47 @@ exports.inviteUser = onCall(CALLABLE_OPTIONS, async (request) => {
   assertRoleCombo(role, functionLevel);
 
   try {
-    const existingUser = await getAuth().getUserByEmail(normalizedEmail);
-    const existingProfile = await db.collection('users').doc(existingUser.uid).get();
-    if (existingProfile.exists && existingProfile.get('status') === 'active') {
-      throw new HttpsError('already-exists', 'This email already has an active CWB account. Edit that account instead.');
-    }
+    await getAuth().getUserByEmail(normalizedEmail);
+    throw new HttpsError('already-exists', 'This email already has a CWB account. Edit or reactivate that account instead.');
   } catch (error) {
     if (error.code !== 'auth/user-not-found') throw error;
   }
 
   const { token, tokenHash } = invitationToken();
   const invitationRef = db.collection('user_invitations').doc(tokenHash);
-  await invitationRef.create({
-    email: normalizedEmail,
-    displayName: displayName || '',
-    address: address || '',
-    role,
-    functionLevel,
-    status: 'pending',
-    createdBy: request.auth.uid,
-    createdAt: FieldValue.serverTimestamp(),
-    expiresAt: Timestamp.fromMillis(Date.now() + INVITATION_TTL_MS)
+  const reservationRef = db.collection('invitation_email_reservations').doc(invitationReservationId(normalizedEmail));
+  const legacyInvitations = await db.collection('user_invitations').where('email', '==', normalizedEmail).get();
+  if (legacyInvitations.docs.some(document => invitationBlocksEmail(document.data()))) {
+    throw new HttpsError('already-exists', 'An invitation for this email is already pending.');
+  }
+  await db.runTransaction(async transaction => {
+    const reservation = await transaction.get(reservationRef);
+    if (reservation.exists) {
+      const existingInvitation = await transaction.get(
+        db.collection('user_invitations').doc(String(reservation.get('invitationId') || 'invalid'))
+      );
+      if (existingInvitation.exists && invitationBlocksEmail(existingInvitation.data())) {
+        throw new HttpsError('already-exists', 'An invitation for this email is already pending or being cancelled.');
+      }
+    }
+    transaction.create(invitationRef, {
+      email: normalizedEmail,
+      displayName: displayName || '',
+      address: address || '',
+      role,
+      functionLevel,
+      status: 'pending',
+      createdBy: request.auth.uid,
+      createdAt: FieldValue.serverTimestamp(),
+      expiresAt: Timestamp.fromMillis(Date.now() + INVITATION_TTL_MS)
+    });
+    transaction.set(reservationRef, {
+      invitationId: invitationRef.id,
+      expiresAt: Timestamp.fromMillis(Date.now() + INVITATION_TTL_MS)
+    });
   });
   logSecurityEvent('user_invitation_created', { actor: pseudonymousId(request.auth.uid) });
-  return { invitationId: tokenHash, token, email: normalizedEmail, expiresInHours: 24 };
+  return { invitationId: invitationRef.id, token, email: normalizedEmail, expiresInHours: 24 };
 });
 
 exports.cancelUserInvitation = onCall(CALLABLE_OPTIONS, async (request) => {
@@ -389,19 +462,52 @@ exports.cancelUserInvitation = onCall(CALLABLE_OPTIONS, async (request) => {
   const invitationId = String(request.data?.invitationId || '');
   if (!/^[0-9a-f]{64}$/.test(invitationId)) throw new HttpsError('invalid-argument', 'Invalid invitation.');
   const invitationRef = db.collection('user_invitations').doc(invitationId);
-  await db.runTransaction(async transaction => {
+  const cancellation = await db.runTransaction(async transaction => {
     const invitationSnapshot = await transaction.get(invitationRef);
-    if (!invitationSnapshot.exists) return;
-    const invitation = invitationSnapshot.data();
-    if (invitation.reservedUid) {
-      const userRef = db.collection('users').doc(invitation.reservedUid);
-      const userSnapshot = await transaction.get(userRef);
-      if (userSnapshot.exists && userSnapshot.get('status') === 'pending_mfa'
-          && userSnapshot.get('invitationId') === invitationId) transaction.delete(userRef);
+    if (!invitationSnapshot.exists) {
+      throw new HttpsError('failed-precondition', 'This invitation is no longer pending. Refresh the account list.');
     }
-    transaction.delete(invitationRef);
+    const invitation = invitationSnapshot.data();
+    transaction.update(invitationRef, { status: 'cancelling', updatedAt: FieldValue.serverTimestamp() });
+    return { reservedUid: invitation.reservedUid || '', email: normalizeEmail(invitation.email) };
+  });
+  if (cancellation.reservedUid) {
+    try {
+      await getAuth().updateUser(cancellation.reservedUid, { disabled: true });
+      await getAuth().setCustomUserClaims(cancellation.reservedUid, {});
+      await getAuth().revokeRefreshTokens(cancellation.reservedUid);
+      await getAuth().deleteUser(cancellation.reservedUid);
+    } catch (error) {
+      if (error.code !== 'auth/user-not-found') throw error;
+    }
+  }
+  await db.runTransaction(async transaction => {
+    const reservationRef = cancellation.email
+      ? db.collection('invitation_email_reservations').doc(invitationReservationId(cancellation.email))
+      : null;
+    const [invitationSnapshot, profileSnapshot, reservationSnapshot] = await Promise.all([
+      transaction.get(invitationRef),
+      cancellation.reservedUid
+        ? transaction.get(db.collection('users').doc(cancellation.reservedUid))
+        : Promise.resolve(null),
+      reservationRef ? transaction.get(reservationRef) : Promise.resolve(null)
+    ]);
+    if (profileSnapshot?.exists && profileSnapshot.get('status') === 'pending_mfa'
+        && profileSnapshot.get('invitationId') === invitationId) transaction.delete(profileSnapshot.ref);
+    if (invitationSnapshot.exists && invitationSnapshot.get('status') === 'cancelling') transaction.delete(invitationRef);
+    if (reservationSnapshot?.exists && reservationSnapshot.get('invitationId') === invitationId) {
+      transaction.delete(reservationRef);
+    }
   });
   return { cancelled: true };
+});
+
+exports.validateUserInvitation = onCall({ ...CALLABLE_OPTIONS, maxInstances: 5, concurrency: 20 }, async (request) => {
+  const token = String(request.data?.token || '');
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new HttpsError('failed-precondition', 'This invitation is invalid or has already been used.');
+  const snapshot = await db.collection('user_invitations').doc(hashInvitationValue(token)).get();
+  assertUsableInvitation(snapshot.exists ? snapshot.data() : null);
+  return { valid: true };
 });
 
 exports.acceptUserInvitation = onCall(CALLABLE_OPTIONS, async (request) => {
@@ -454,20 +560,26 @@ exports.completeUserInvitation = onCall(CALLABLE_OPTIONS, async (request) => {
   }
 
   await applyClaims(request.auth.uid, invitation.role, invitation.functionLevel, false);
-  await db.runTransaction(async transaction => {
-    const current = await transaction.get(invitationRef);
-    const data = current.exists ? current.data() : null;
-    assertUsableInvitation(data);
-    assertInvitationIdentity(data, userRecord);
-    if (data.status !== 'reserved') throw new HttpsError('failed-precondition', 'This invitation is invalid or has already been used.');
-    transaction.set(db.collection('users').doc(request.auth.uid), {
-      email: data.email, displayName: data.displayName || userRecord.displayName || '',
-      address: data.address || '', role: data.role, functionLevel: data.functionLevel,
-      status: 'active', mfaEnrolled: true, invitationId: FieldValue.delete(),
-      updatedAt: FieldValue.serverTimestamp()
-    }, { merge: true });
-    transaction.delete(invitationRef);
-  });
+  try {
+    await db.runTransaction(async transaction => {
+      const current = await transaction.get(invitationRef);
+      const data = current.exists ? current.data() : null;
+      assertUsableInvitation(data);
+      assertInvitationIdentity(data, userRecord);
+      if (data.status !== 'reserved') throw new HttpsError('failed-precondition', 'This invitation is invalid or has already been used.');
+      transaction.set(db.collection('users').doc(request.auth.uid), {
+        email: data.email, displayName: data.displayName || userRecord.displayName || '',
+        address: data.address || '', role: data.role, functionLevel: data.functionLevel,
+        status: 'active', mfaEnrolled: true, invitationId: FieldValue.delete(),
+        updatedAt: FieldValue.serverTimestamp()
+      }, { merge: true });
+      transaction.delete(invitationRef);
+      transaction.delete(db.collection('invitation_email_reservations').doc(invitationReservationId(data.email)));
+    });
+  } catch (error) {
+    await getAuth().setCustomUserClaims(request.auth.uid, {});
+    throw error;
+  }
   await getAuth().revokeRefreshTokens(request.auth.uid);
   logSecurityEvent('user_invitation_completed', { actor: pseudonymousId(request.auth.uid) });
   return { activated: true };
@@ -591,7 +703,7 @@ exports.deleteUser = onCall(LIFECYCLE_CALLABLE_OPTIONS, async (request) => {
   const auth = getAuth();
   const userRecord = await auth.getUser(uid);
   const { email } = validateLifecycleRequest(request.data, userRecord);
-  const job = await queueLifecycleJob({
+  const result = await completeImmediateDeletion({
     action: 'delete',
     actorUid: request.auth.uid,
     uid,
@@ -602,11 +714,7 @@ exports.deleteUser = onCall(LIFECYCLE_CALLABLE_OPTIONS, async (request) => {
       text: 'Your CWB Operations account and personal profile data have been permanently deleted from active CWB systems. Your access credentials and enrolled two-factor authentication have also been removed.'
     }
   });
-  const result = await processQueuedLifecycleJob(job);
-  if (!result.notificationSent) {
-    logSecurityEvent('account_notification_failed', { target: pseudonymousId(uid), action: 'delete' }, 'ERROR');
-  }
-  return { uid, deleted: result.operationCompleted, queued: !result.operationCompleted, ...result };
+  return { uid, ...result };
 });
 
 exports.retryLifecycleNotifications = onSchedule({
@@ -623,7 +731,7 @@ exports.retryLifecycleNotifications = onSchedule({
     .where('expiresAt', '<=', Timestamp.now())
     .limit(500)
     .get();
-  await Promise.all(expiredSnapshot.docs.map(document => document.ref.delete()));
+  await Promise.all(expiredSnapshot.docs.map(document => processQueuedLifecycleJob(document.ref)));
   const snapshot = await outbox
     .where('nextAttemptAt', '<=', Timestamp.now())
     .limit(100)
@@ -674,17 +782,23 @@ exports.listUsers = onCall(CALLABLE_OPTIONS, async (request) => {
   const [records, profileSnapshot, invitationSnapshot] = await Promise.all([
     listAllAuthRecords(auth),
     db.collection('users').get(),
-    db.collection('user_invitations').where('status', 'in', ['pending', 'reserved']).get()
+    db.collection('user_invitations').where('status', 'in', ['pending', 'reserved', 'cancelling']).get()
   ]);
 
   const profiles = new Map();
   profileSnapshot.forEach((doc) => profiles.set(doc.id, doc.data()));
+  const activeInvitations = invitationSnapshot.docs.filter(document => invitationBlocksEmail(document.data()));
+  const listedEmails = new Set();
 
   const users = records.map((record) => {
     const profile = profiles.get(record.uid) || {};
     const suspended = record.disabled || profile.status === 'suspended';
+    const invitationDocument = activeInvitations.find(document => invitationMatchesUser(document.data(), record));
+    const email = normalizeEmail(record.email);
+    if (email) listedEmails.add(email);
     return {
       uid: record.uid,
+      invitationId: invitationDocument?.id,
       email: record.email || '',
       displayName: profile.displayName || record.displayName || '',
       address: profile.address || '',
@@ -692,7 +806,10 @@ exports.listUsers = onCall(CALLABLE_OPTIONS, async (request) => {
       mfaEnrolled: (record.multiFactor?.enrolledFactors || []).length > 0,
       role: profile.role ?? record.customClaims?.role ?? null,
       functionLevel: profile.functionLevel ?? record.customClaims?.functionLevel ?? null,
-      status: suspended ? 'suspended' : (profile.status || 'active'),
+      status: suspended ? 'suspended'
+        : profile.status === 'active' ? 'active'
+          : invitationDocument ? 'invited'
+            : (profile.status || 'active'),
       loginCount: profile.loginCount || 0,
       lastLogin: profile.lastLogin || record.metadata?.lastSignInTime || null,
       createdAt: profile.createdAt || record.metadata?.creationTime || null
@@ -701,7 +818,9 @@ exports.listUsers = onCall(CALLABLE_OPTIONS, async (request) => {
 
   invitationSnapshot.forEach((document) => {
     const invitation = document.data();
-    if ((invitation.expiresAt?.toMillis?.() || 0) <= Date.now()) return;
+    const email = normalizeEmail(invitation.email);
+    if (!invitationBlocksEmail(invitation) || (email && listedEmails.has(email))) return;
+    if (email) listedEmails.add(email);
     users.push({
       uid: `invitation:${document.id}`,
       invitationId: document.id,
@@ -810,6 +929,11 @@ exports.checkInBoat = onCall(CALLABLE_OPTIONS, async (request) => {
 
 module.exports.buildIdentityUpdate = buildIdentityUpdate;
 module.exports.hashInvitationValue = hashInvitationValue;
+module.exports.invitationReservationId = invitationReservationId;
+module.exports.invitationIsActive = invitationIsActive;
+module.exports.invitationBlocksEmail = invitationBlocksEmail;
+module.exports.invitationMatchesUser = invitationMatchesUser;
+module.exports.completeImmediateDeletion = completeImmediateDeletion;
 module.exports.assertUsableInvitation = assertUsableInvitation;
 module.exports.assertInvitationIdentity = assertInvitationIdentity;
 module.exports.validateLifecycleRequest = validateLifecycleRequest;
@@ -817,3 +941,4 @@ module.exports.sendLifecycleEmail = sendLifecycleEmail;
 module.exports.encryptLifecycleMessage = encryptLifecycleMessage;
 module.exports.decryptLifecycleMessage = decryptLifecycleMessage;
 module.exports.lifecycleJobExpired = lifecycleJobExpired;
+module.exports.lifecycleNotificationExpired = lifecycleNotificationExpired;

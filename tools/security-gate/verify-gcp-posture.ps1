@@ -61,22 +61,17 @@ if ("roles/cloudbuild.builds.builder" -notin $buildRoles) {
     $failures.Add("Cloud Functions build identity is missing roles/cloudbuild.builds.builder")
 }
 
-$expectedFunctions = @{
-    telemetryIngest = "cwb-telemetry-ingest@$ProjectId.iam.gserviceaccount.com"
-    inviteUser = "cwb-user-admin@$ProjectId.iam.gserviceaccount.com"
-    updateUserProfile = "cwb-user-admin@$ProjectId.iam.gserviceaccount.com"
-    setUserRole = "cwb-user-admin@$ProjectId.iam.gserviceaccount.com"
-    disableUser = "cwb-user-admin@$ProjectId.iam.gserviceaccount.com"
-    enableUser = "cwb-user-admin@$ProjectId.iam.gserviceaccount.com"
-    deleteUser = "cwb-user-admin@$ProjectId.iam.gserviceaccount.com"
-    resetUserMfa = "cwb-user-admin@$ProjectId.iam.gserviceaccount.com"
-    listUsers = "cwb-user-admin@$ProjectId.iam.gserviceaccount.com"
-    claimDefaultRole = "cwb-user-admin@$ProjectId.iam.gserviceaccount.com"
-    checkInBoat = "cwb-user-admin@$ProjectId.iam.gserviceaccount.com"
-    reportSessionExit = "cwb-user-admin@$ProjectId.iam.gserviceaccount.com"
-    pushBoatConfig = "cwb-boat-config@$ProjectId.iam.gserviceaccount.com"
-    purgeExpiredTrails = "cwb-telemetry-ingest@$ProjectId.iam.gserviceaccount.com"
-    reconcileIdentityState = "cwb-user-admin@$ProjectId.iam.gserviceaccount.com"
+$endpointPolicyPath = Join-Path $PSScriptRoot "gcp-endpoints.json"
+$endpointPolicy = Get-Content -Raw $endpointPolicyPath | ConvertFrom-Json
+$expectedFunctions = @{}
+foreach ($endpoint in $endpointPolicy.endpoints) {
+    $runtimeIdentity = switch ($endpoint.name) {
+        "telemetryIngest" { "cwb-telemetry-ingest@$ProjectId.iam.gserviceaccount.com"; break }
+        "purgeExpiredTrails" { "cwb-telemetry-ingest@$ProjectId.iam.gserviceaccount.com"; break }
+        "pushBoatConfig" { "cwb-boat-config@$ProjectId.iam.gserviceaccount.com"; break }
+        default { "cwb-user-admin@$ProjectId.iam.gserviceaccount.com" }
+    }
+    $expectedFunctions[$endpoint.name] = $runtimeIdentity
 }
 $deployedFunctions = @(Invoke-GcloudJson @("functions", "list", "--v2", "--regions=us-west1"))
 foreach ($function in $deployedFunctions) {
@@ -101,24 +96,44 @@ foreach ($name in $expectedFunctions.Keys) {
 
 $telemetry = $functions | Where-Object { ($_.name -split "/")[-1] -eq "telemetryIngest" }
 $boatConfig = $functions | Where-Object { ($_.name -split "/")[-1] -eq "pushBoatConfig" }
+$disableUser = $functions | Where-Object { ($_.name -split "/")[-1] -eq "disableUser" }
+$deleteUser = $functions | Where-Object { ($_.name -split "/")[-1] -eq "deleteUser" }
+$retryLifecycleNotifications = $functions | Where-Object { ($_.name -split "/")[-1] -eq "retryLifecycleNotifications" }
 $secretBindings = @(
     @($telemetry, "CHIRPSTACK_WEBHOOK_TOKEN", "cwb-telemetry-ingest@$ProjectId.iam.gserviceaccount.com"),
-    @($boatConfig, "CHIRPSTACK_API_TOKEN", "cwb-boat-config@$ProjectId.iam.gserviceaccount.com")
+    @($boatConfig, "CHIRPSTACK_API_TOKEN", "cwb-boat-config@$ProjectId.iam.gserviceaccount.com"),
+    @($disableUser, "GMAIL_SENDER_EMAIL", "cwb-user-admin@$ProjectId.iam.gserviceaccount.com"),
+    @($disableUser, "GMAIL_APP_PASSWORD", "cwb-user-admin@$ProjectId.iam.gserviceaccount.com"),
+    @($disableUser, "LIFECYCLE_NOTIFICATION_KEY", "cwb-user-admin@$ProjectId.iam.gserviceaccount.com"),
+    @($deleteUser, "GMAIL_SENDER_EMAIL", "cwb-user-admin@$ProjectId.iam.gserviceaccount.com"),
+    @($deleteUser, "GMAIL_APP_PASSWORD", "cwb-user-admin@$ProjectId.iam.gserviceaccount.com"),
+    @($deleteUser, "LIFECYCLE_NOTIFICATION_KEY", "cwb-user-admin@$ProjectId.iam.gserviceaccount.com"),
+    @($retryLifecycleNotifications, "GMAIL_SENDER_EMAIL", "cwb-user-admin@$ProjectId.iam.gserviceaccount.com"),
+    @($retryLifecycleNotifications, "GMAIL_APP_PASSWORD", "cwb-user-admin@$ProjectId.iam.gserviceaccount.com"),
+    @($retryLifecycleNotifications, "LIFECYCLE_NOTIFICATION_KEY", "cwb-user-admin@$ProjectId.iam.gserviceaccount.com")
 )
 
 $schedulerJobs = @(Invoke-GcloudJson @("scheduler", "jobs", "list", "--location=us-west1"))
-$purgeJob = $schedulerJobs | Where-Object { $_.name -match "purgeExpiredTrails" }
-if (-not $purgeJob) {
-    $failures.Add("Scheduled GPS retention purge job is missing")
-} else {
-    if ($purgeJob.state -ne "ENABLED") { $failures.Add("Scheduled GPS retention purge job is not enabled") }
-    if ($purgeJob.schedule -ne "every 6 hours") { $failures.Add("Scheduled GPS retention purge job has an unexpected schedule") }
-    if ($purgeJob.httpTarget.httpMethod -ne "POST" -or $purgeJob.httpTarget.uri -notmatch "purgeexpiredtrails") {
-        $failures.Add("Scheduled GPS retention purge job has an unexpected target")
+$expectedSchedules = @(
+    @{ Name = "purgeExpiredTrails"; Schedule = "every 6 hours"; Identity = "cwb-telemetry-ingest@$ProjectId.iam.gserviceaccount.com" },
+    @{ Name = "purgeExpiredInvitations"; Schedule = "every 6 hours"; Identity = "cwb-user-admin@$ProjectId.iam.gserviceaccount.com" },
+    @{ Name = "purgeExpiredBatteryEvents"; Schedule = "every 24 hours"; Identity = "cwb-user-admin@$ProjectId.iam.gserviceaccount.com" },
+    @{ Name = "retryLifecycleNotifications"; Schedule = "every 15 minutes"; Identity = "cwb-user-admin@$ProjectId.iam.gserviceaccount.com" },
+    @{ Name = "reconcileIdentityState"; Schedule = "every 1 hours"; Identity = "cwb-user-admin@$ProjectId.iam.gserviceaccount.com" }
+)
+foreach ($expectedSchedule in $expectedSchedules) {
+    $job = $schedulerJobs | Where-Object { $_.name -match $expectedSchedule.Name }
+    if (-not $job) {
+        $failures.Add("Scheduled function is missing: $($expectedSchedule.Name)")
+        continue
     }
-    $schedulerIdentity = "cwb-telemetry-ingest@$ProjectId.iam.gserviceaccount.com"
-    if ($purgeJob.httpTarget.oidcToken.serviceAccountEmail -ne $schedulerIdentity) {
-        $failures.Add("Scheduled GPS retention purge job uses an unexpected identity")
+    if ($job.state -ne "ENABLED") { $failures.Add("Scheduled function is not enabled: $($expectedSchedule.Name)") }
+    if ($job.schedule -ne $expectedSchedule.Schedule) { $failures.Add("Scheduled function has an unexpected schedule: $($expectedSchedule.Name)") }
+    if ($job.httpTarget.httpMethod -ne "POST" -or $job.httpTarget.uri -notmatch $expectedSchedule.Name) {
+        $failures.Add("Scheduled function has an unexpected target: $($expectedSchedule.Name)")
+    }
+    if ($job.httpTarget.oidcToken.serviceAccountEmail -ne $expectedSchedule.Identity) {
+        $failures.Add("Scheduled function uses an unexpected identity: $($expectedSchedule.Name)")
     }
 }
 

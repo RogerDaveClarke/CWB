@@ -589,8 +589,10 @@ function wireEventListeners() {
             const result = await callFunction("deleteUser", { uid: state.editingUid, confirmationEmail });
             removeUserLocally(state.editingUid);
             closeDrawer();
-            loadUsers();
-            if (result.data?.notificationSent === false) reportNotificationFailure("Account deletion", user.email);
+            await loadUsers();
+            if (result.data?.notificationQueued !== true) {
+                reportNotificationFailure("Account deletion", user.email);
+            }
         } catch (error) {
             console.error("Delete user failed", error);
             showFormMessage(error.message || "Failed to delete user.");
@@ -612,7 +614,7 @@ function wireEventListeners() {
         if (!user) return;
 
         if (button.classList.contains("cancel-invitation")) {
-            if (!confirm(`Cancel the invitation for ${user.email}? The emailed link will no longer work.`)) return;
+            if (!confirm(`Cancel CWB activation for ${user.email}? Any incomplete account setup will be removed.`)) return;
             button.disabled = true;
             try {
                 await callFunction("cancelUserInvitation", { invitationId: user.invitationId });
@@ -620,6 +622,7 @@ function wireEventListeners() {
             } catch (error) {
                 alert(error.message || "Unable to cancel invitation.");
                 button.disabled = false;
+                await loadUsers();
             }
             return;
         }
@@ -660,13 +663,9 @@ function wireEventListeners() {
                 const confirmationEmail = requestEmailConfirmation(user, "permanently delete");
                 if (confirmationEmail) {
                     const result = await callFunction("deleteUser", { uid, confirmationEmail });
-                    if (result.data?.operationCompleted) {
-                        removeUserLocally(uid);
-                    } else {
-                        alert("Account deletion is queued and will be retried automatically.");
-                    }
+                    removeUserLocally(uid);
                     loadUsers();
-                    if (result.data?.operationCompleted && result.data?.notificationSent === false) reportNotificationFailure("Account deletion", user.email);
+                    if (result.data?.notificationQueued !== true) reportNotificationFailure("Account deletion", user.email);
                 }
             }
         } catch (error) {

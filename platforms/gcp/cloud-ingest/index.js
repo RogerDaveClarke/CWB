@@ -206,6 +206,7 @@ exports.telemetryIngest = onRequest({
 const userAdmin = require('./userAdmin');
 exports.inviteUser = userAdmin.inviteUser;
 exports.cancelUserInvitation = userAdmin.cancelUserInvitation;
+exports.validateUserInvitation = userAdmin.validateUserInvitation;
 exports.acceptUserInvitation = userAdmin.acceptUserInvitation;
 exports.completeUserInvitation = userAdmin.completeUserInvitation;
 exports.updateUserProfile = userAdmin.updateUserProfile;
