@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "firebase-admin": "^14.3.0",
-    "lucide": "^0.468.0",
+    "lucide": "^1.47.0",
     "qrcode-generator": "1.4.4"
   },
   "overrides": {
