@@ -1,20 +1,112 @@
-## Problem Statement
-The Center for Wooden Boats in Seattle offers free 1 hour rows on two specific row boats. It is first come first served. When a customer takes out a boat, the customer details are logged in a paper tracker with the time out and when they return the time in. Sometimes people forget to do the logging. When customers arrive and there are no boats available they have to wait until a boat returns. Sometimes the previous users are late and the livery volunteers to watch for this and get a rescue boat to go out and tow them in. This slows downs the operation. Additionally, next year, the CWB will introduce a digital system allowing pre-booking. The ideal behind this project is to place a tracker on each row boat that will provide frequent pings LoRa transmissions wiht the boat's ID and GPS coordinates. The webfront consumin this data will show when each boat when out, how long its been out there and if its going to be late based on the current vector so that alerts can be sent.
+## CWB Livery Operations: Fleet, Rentals, and Lessons
 
-## Dashboard & Mapping
-Operations Dashboard
-![alt text](image.png)
+The Center for Wooden Boats (CWB) livery makes rowing and sailing accessible
+through free experiences and paid rentals. This project is a proof of concept
+(POC) for digitising the management of that service—not simply a boat-tracking
+map. Its aim is to give staff and volunteers a shared operational view of the
+fleet, from whether a boat is serviceable and available to what is checked out,
+where a tracked boat is, and when it may return.
 
-Boat Administration
-![alt text](image-1.png)
+Over time, the same operational foundation could support the full livery
+lifecycle: service and maintenance, free and paid rentals, and reservations for
+instructor-led lessons. A boat tracker remains a complementary part of the
+solution: it can provide evidence of a boat's physical presence and help staff
+estimate a return time. It does not replace livery judgment or make return-time
+estimates certain.
 
-Rental History
-![alt text](image-2.png)
+### The operational problem
 
+- Boat availability, serviceability, schedules, and rental activity are hard to
+  coordinate when information is split across paper records and people.
+- Paper checkout and return records can be incomplete, making it difficult to
+  know what is available or which boats need attention.
+- When a boat is late, staff may have to watch for it and decide whether a
+  response is needed, while arriving customers wait without clear availability
+  information.
+- Free rows, paid rentals, and instructor lessons have different operating
+  rules. A future booking workflow needs to fit those rules without double
+  booking boats or disrupting dock operations.
+- Fleet operations, customer relationships, and payment processes will
+  eventually need to work together, but the POC does not yet connect to a CRM or
+  payment provider.
 
-## Marine Fleet Telemetry & Mooring Detection System
+### What the POC demonstrates
 
-Complete edge-to-cloud architecture stack orchestrating low-power asset tracking, automated cloud stream ingestion, and real-time open-map vessel visualizations.
+The screenshots show the current interface and intended workflow. They are not
+proof that live trackers, production data, or a production deployment are
+connected. The current application includes:
+
+- **Operations dashboard:** fleet status, availability, alerts, and a map for
+  viewing tracker positions. Location trails are limited to active rentals.
+- **Fleet administration:** boat records, serviceability status, and annual
+  operating schedules.
+- **Rental operations and history:** staff-managed check-out/check-in and a
+  retained, privacy-minimized rental record.
+- **Account administration:** controlled account management for authorized
+  users.
+- **Telemetry foundation:** firmware and a cloud-ingest path for authenticated
+  boat telemetry, including position and battery information. Return estimates
+  depend on working trackers, suitable coverage, and validation against actual
+  trips.
+
+The POC does **not** yet provide customer self-service reservations, instructor
+lesson scheduling, rental payments, or a Salesforce CRM integration. Those are
+future requirements, not capabilities to assume from the screens.
+
+### Screenshots
+
+**Rowboat operations**
+
+![Rowboat operations dashboard](./platforms/gcp/frontend/assets/Rowboat%20Operations.png)
+
+**Fleet management**
+
+![Fleet management](./platforms/gcp/frontend/assets/Fleet%20Management.png)
+
+**Rental history**
+
+![Rental history](./platforms/gcp/frontend/assets/Rental%20History.png)
+
+**Account administration**
+
+![Account administration](./platforms/gcp/frontend/assets/Account%20Administration.png)
+
+### Expected advantages and challenges
+
+If adopted and validated with livery staff, a shared system could reduce
+duplicate record-keeping, make serviceability and availability easier to see,
+improve handoffs between volunteers, and provide better operational records.
+Telemetry could help staff locate a boat and prioritize late-return follow-up.
+Structured fleet and rental data could also provide a foundation for later
+booking, CRM, and payment integrations.
+
+Success depends on fitting the real dock workflow, keeping boat and rental
+records accurate, training staff and volunteers, and maintaining reliable
+hardware and network coverage. Location and return estimates are operational
+signals, not guarantees. Access controls and limited retention are important
+because location and rental records can be sensitive.
+
+### Adoption and cost principles
+
+The goal is **no incremental cost to CWB for the POC and routine pilot
+operation**: use open-source components, donated or already-owned hardware,
+volunteer contribution, and existing organizational services where available.
+The design should stay within free service allowances and should not introduce
+paid services without CWB approval.
+
+This is a cost target, not a guarantee of permanently free hosting. Cloud usage
+can exceed free allowances, and production use may require paid plans or
+support. Salesforce access, a payment provider, booking services, and any new
+Teams licenses may also carry costs or transaction fees. Before enabling those
+services, CWB should verify existing entitlements, forecast usage, and approve
+any potential spend. No Salesforce, payment, booking, or Teams integration is
+implemented in this POC.
+
+For an organization adopting Microsoft Teams, Teams could provide a familiar
+place for staff communication, training, and links to the authorized livery
+application, subject to CWB's existing tenant and licenses. The application is
+not currently integrated with Teams; onboarding to Teams is an organizational
+adoption step, not a prerequisite for the POC.
 
 ## Hardware
 
@@ -53,17 +145,26 @@ compatibility flag and divider calibration still require hardware follow-up.
 
 ---
 
-## Data Storage and Webpage
-Initially the webpage will be hosted in GCP using firebase to store the data  for the POC phase. However, longer term this imposes a cost on the CWB which, being a charity, is not desirible.
+## Architecture and Integration Path
 
-The LoRaWAN network is independent of Helium. An outdoor US915 gateway on the boathouse forwards packets over the CWB Ethernet LAN to a private ChirpStack v4 server. ChirpStack authenticates OTAA devices, decrypts uplinks, and sends JSON HTTP events to the selected application adapter. During the POC the adapter is GCP; after approval the ChirpStack HTTP integration is changed to Wix without modifying or reflashing the tracker firmware.
+The current POC uses Firebase on Google Cloud Platform (GCP) for hosting,
+authentication, Firestore data, and cloud ingestion. The optional tracker path
+uses a US915 gateway and private ChirpStack v4 network server to forward
+authenticated telemetry to the application adapter. See
+[`docs/private-chirpstack.md`](./docs/private-chirpstack.md) for gateway,
+device-profile, and webhook setup.
 
-See `docs/private-chirpstack.md` for server, gateway, device-profile, and webhook setup.
+The repository also contains a Wix adapter. It is an alternative deployment
+path, not evidence of a production migration or a decision that Wix is the
+long-term platform. Keep the versioned tracker protocol separate from the
+application adapter so a future approved backend can be integrated without
+changing tracker firmware.
 
-Post-POC the following approach will be taken:
-### Wix Velo Dev Mode
-Step-by-Step Wix Integration GuideCreate the Wix CMS Database: 
-Open your Wix Editor, turn on Dev Mode / Velo, and create a new Content Collection named VesselTelemetry. Add fields for protocolVersion (Number), latitude (Number), longitude (Number), batteryMv (Number), variance (Number), statusString (Text), lowBattery (Boolean), gpsFix (Boolean), insideDockGeofence (Boolean), mooringClassificationValid (Boolean), maxTemperatureC (Number), and timestamp (Date and Time). Expose the webhook API using `platforms/wix/backend/http-functions.js`. Publish the site, then configure the ChirpStack HTTP integration to use `https://yourdomain.com/_functions/telemetryIngest`. Deploy the map using the files under `platforms/wix/frontend`.
+Future design work should evaluate how bookings for free and paid boats and
+instructor lessons fit with livery operations, and whether Salesforce CRM and
+the payment provider can be integrated safely using CWB's existing agreements
+and licenses. These integrations are not part of the current POC and should be
+costed and approved before implementation.
 
 ## ⚓ Mooring Detection Algorithm & Classification Logic
 
@@ -112,9 +213,12 @@ The variance classifier is gated by a 55 m circular geofence centered on the CWB
 *   `platforms/wix/backend/`: Wix Velo ingestion and retention jobs.
 *   `platforms/wix/frontend/`: Wix page and custom-element code.
 
-### Git and Platform Migration
+### Firmware and Deployment Adapters
 
-The repository has one platform-neutral firmware implementation. GCP and Wix are deployment adapters for the same versioned telemetry protocol and remain together on `main`.
+The repository has one platform-neutral firmware implementation. GCP and Wix
+are deployment adapters for the same versioned telemetry protocol and remain
+together on `main`; the presence of both adapters does not imply a production
+migration decision.
 
 ### Security and Privacy Gates
 
@@ -224,7 +328,7 @@ does not overwrite configuration or rental fields.
 | `rental_schedule` | Map | Required | Weekly schedule described below |
 | `configuration_updated_at` | Timestamp | Set on admin save | Last configuration write |
 | `tracking_enabled` | Boolean | Active-rental state | Server-side gate controlling breadcrumb creation |
-| `booked` | Boolean | Active-rental state | Whether the boat has an active booking/rental |
+| `booked` | Boolean | Active-rental state | Legacy active rental/checkout flag; this is not a customer reservation or lesson-booking workflow |
 | `booked_by` | String | Present only during rental | Renter name; deleted at check-in |
 | `passenger_count` | Integer | Present only during rental, 1-6 | Party size; removed from the boat at check-in |
 | `time_out` | Timestamp | Present only during rental | Check-out time; deleted at check-in |
