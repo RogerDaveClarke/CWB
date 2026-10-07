@@ -2,7 +2,7 @@
 
 The Center for Wooden Boats (CWB) livery makes rowing and sailing accessible
 through free experiences and paid rentals. This project is a proof of concept
-(POC) for digitising the management of that service—not simply a boat-tracking
+(POC) for digitizing the management of that service—not simply a boat-tracking
 map. Its aim is to give staff and volunteers a shared operational view of the
 fleet, from whether a boat is serviceable and available to what is checked out,
 where a tracked boat is, and when it may return.
