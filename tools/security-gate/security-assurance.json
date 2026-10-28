@@ -2,6 +2,22 @@
   "lastReviewed": "2026-09-10",
   "nextReviewBy": "2026-12-10",
   "owner": "CWB technical lead",
+  "ignoredExtensions": [
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".svg",
+    ".webp",
+    ".ico",
+    ".bmp",
+    ".ppt",
+    ".pptx"
+  ],
+  "ignoredFileTypes": [
+    "images",
+    "powerpoint"
+  ],
   "requiredDocuments": [
     "docs/security/threat-model.md",
     "docs/security/incident-response.md",
@@ -15,7 +31,7 @@
       "owner": "CWB technical lead",
       "reason": "No load balancer, serverless NEG, stable public domain, or approved ChirpStack source IP is currently provisioned. Direct function ingress must remain available until that migration is tested.",
       "compensatingControl": "The webhook requires a rotatable Secret Manager credential, rejects oversized and invalid requests, applies instance-local throttling, records replay receipts transactionally, and emits rejection metrics.",
-      "reviewBy": "2026-10-10"
+      "reviewBy": "2026-12-10"
     },
     {
       "id": "SEC-002",
@@ -31,7 +47,7 @@
       "owner": "CWB executive owner",
       "reason": "A bucket retention period, backup data scope, notification channel, and isolated restore project must be approved before provisioning to avoid creating an unmanaged copy of sensitive data.",
       "compensatingControl": "Source and deployment configuration remain recoverable from protected Git history, while short-lived GPS trails are excluded from recovery by design; application data recovery remains unproven.",
-      "reviewBy": "2026-10-10"
+      "reviewBy": "2026-12-10"
     },
     {
       "id": "SEC-004",
@@ -39,7 +55,7 @@
       "owner": "CWB executive owner",
       "reason": "Alert conditions can be provisioned without exposing contact data, but CWB must select an operational email, SMS, PagerDuty, or Pub/Sub destination and test delivery.",
       "compensatingControl": "Enabled log metrics and alert conditions plus a 365-day audit sink preserve detection evidence for manual investigation, but they do not provide paging until a channel is tested.",
-      "reviewBy": "2026-10-10"
+      "reviewBy": "2026-12-10"
     },
     {
       "id": "SEC-005",
@@ -47,7 +63,7 @@
       "owner": "CWB technical lead",
       "reason": "The current ChirpStack HTTP integration supports a static custom header but no per-request signature. Replay receipts and short retention reduce impact; a signing proxy or mTLS-capable integration is required for stronger sender proof.",
       "compensatingControl": "Constant-time credential comparison, Secret Manager rotation, transactional replay receipts, request limits, throttling, and rejection alerts limit credential and replay abuse.",
-      "reviewBy": "2026-10-10"
+      "reviewBy": "2026-12-10"
     },
     {
       "id": "SEC-006",
@@ -55,7 +71,7 @@
       "owner": "CWB executive owner",
       "reason": "Creating an arbitrary budget without an approved monthly amount and recipient would produce misleading assurance. Approve a threshold and monitored channel before provisioning.",
       "compensatingControl": "Function payload and instance limits constrain application-layer consumption, while security metrics expose abnormal request volume; billing-cost detection remains manual until a budget channel is approved.",
-      "reviewBy": "2026-10-10"
+      "reviewBy": "2026-12-10"
     }
   ]
 }

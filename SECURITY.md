@@ -1,5 +1,12 @@
 # Security Policy
 
+## Scope & Exclusions
+
+Security policies, automated gates, and static analysis apply to application code,
+cloud services, Firestore rules, firmware, and API endpoints. Static media and presentation
+assets—specifically images (`.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.webp`, `.bmp`, `.ico`)
+and PowerPoint documents (`.ppt`, `.pptx`)—are ignored from security gate enforcement.
+
 ## Supported Versions
 
 Use this section to tell people about which versions of your project are

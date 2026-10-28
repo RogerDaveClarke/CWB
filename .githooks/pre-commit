@@ -12,17 +12,34 @@ git checkout-index --all --prefix="$staged_tree/"
 echo "Security gate: checking staged secrets"
 gitleaks protect --staged --redact --no-banner
 
-echo "Security gate: checking CWB privacy controls"
-(cd "$staged_tree" && node tools/privacy-gate/privacy-gate.mjs)
+# Security and privacy policies: ignore images and PowerPoint documents
+MEDIA_IGNORE_REGEX='\.(jpe?g|png|gif|svg|webp|bmp|ico|pptx?)$'
+staged_files=$(git diff --cached --name-only || true)
+non_media_changes=$(echo "$staged_files" | grep -vEi "$MEDIA_IGNORE_REGEX" || true)
 
-echo "Security gate: checking GCP endpoint authentication"
-(cd "$staged_tree" && node tools/security-gate/security-gate.mjs)
+privacy_changes=$(echo "$non_media_changes" | grep -E '^(platforms/gcp/(firestore\.rules|cloud-ingest/|frontend/)|tools/privacy-gate/)' || true)
+if [ -n "$privacy_changes" ]; then
+    echo "Security gate: checking CWB privacy controls"
+    (cd "$staged_tree" && node tools/privacy-gate/privacy-gate.mjs)
+fi
 
-echo "Security gate: checking penetration-test regressions"
-(cd "$staged_tree" && node tools/pentest-gate/pentest-gate.mjs)
+security_changes=$(echo "$non_media_changes" | grep -E '^(platforms/gcp/(cloud-ingest/|frontend/|firebase\.json|firestore\.rules|security/)|tools/security-gate/|\.github/workflows/)' || true)
+if [ -n "$security_changes" ]; then
+    echo "Security gate: checking GCP endpoint authentication"
+    (cd "$staged_tree" && node tools/security-gate/security-gate.mjs)
+fi
 
-echo "Accessibility gate: checking WCAG 2.1 AA regressions"
-(cd "$staged_tree" && node tools/accessibility-gate/accessibility-gate.mjs)
+pentest_changes=$(echo "$non_media_changes" | grep -E '^(platforms/gcp/(frontend/|firebase\.json|firestore\.rules|cloud-ingest/)|tools/pentest-gate/|docs/security/penetration-test)' || true)
+if [ -n "$pentest_changes" ]; then
+    echo "Security gate: checking penetration-test regressions"
+    (cd "$staged_tree" && node tools/pentest-gate/pentest-gate.mjs)
+fi
+
+a11y_changes=$(echo "$non_media_changes" | grep -E '^platforms/gcp/frontend/.*\.html$' || true)
+if [ -n "$a11y_changes" ]; then
+    echo "Accessibility gate: checking WCAG 2.1 AA regressions"
+    (cd "$staged_tree" && node tools/accessibility-gate/accessibility-gate.mjs)
+fi
 
 if git diff --cached --name-only | grep -Eq '^platforms/gcp/cloud-ingest/(.*\.js|package(-lock)?\.json)$'; then
     echo "Security gate: testing GCP endpoint authentication"

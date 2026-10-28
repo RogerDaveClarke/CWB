@@ -29,6 +29,10 @@ It runs automatically before firmware builds and the Firebase deploy task, and
 in CI. It catches known regressions; it does **not** replace judgement about new
 data flows. Full analysis: `docs/privacy-compliance-review.md`.
 
+Images (.png, .jpg, .jpeg, .gif, .svg, .webp) and PowerPoint presentations (.ppt,
+.pptx) that do not collect, process, or transmit personal data are excluded from
+privacy gate enforcement.
+
 ## The four rules that must never regress
 
 1. **Purpose limitation.** GPS breadcrumbs are retained only while

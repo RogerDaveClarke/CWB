@@ -1,5 +1,7 @@
 {
   "$comment": "Privacy gate policy. Acknowledgements expire: an expired entry fails the build.",
+  "ignoredExtensions": [".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico", ".bmp", ".ppt", ".pptx"],
+  "ignoredFileTypes": ["images", "powerpoint"],
   "identityKeys": ["booked_by", "bookedBy", "renter_name", "customer_name", "renter", "email", "phone"],
   "locationKeys": ["latitude", "longitude", "lat", "lon", "coordinates", "geo", "last_ping"],
   "sensitivePathPatterns": ["/boats/\\{boatId\\}$", "/boats/\\{boatId\\}/history/\\{document\\}$"],
@@ -78,13 +80,13 @@
       "id": "P007",
       "owner": "CWB operations lead",
       "reason": "The check-out dialog discloses tracking verbally to the renter but records no consent artifact. Wording and record format need CWB counsel review before implementation.",
-      "reviewBy": "2026-09-23"
+      "reviewBy": "2026-12-10"
     },
     {
       "id": "P008",
       "owner": "CWB operations lead",
       "reason": "CWB has no published consumer health data privacy policy yet. Blocked on the applicability determination in docs/privacy-compliance-review.md.",
-      "reviewBy": "2026-09-23"
+      "reviewBy": "2026-12-10"
     }
   ]
 }

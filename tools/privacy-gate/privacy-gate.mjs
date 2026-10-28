@@ -11,8 +11,19 @@ const JSON_OUTPUT = process.argv.includes("--json");
 
 const policy = JSON.parse(readFileSync(POLICY_PATH, "utf8"));
 const findings = [];
+const ignoredExtensions = new Set(
+    (policy.ignoredExtensions || [".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico", ".bmp", ".ppt", ".pptx"])
+        .map(ext => ext.toLowerCase())
+);
+
+function isIgnored(relPath) {
+    if (!relPath) return false;
+    const dot = relPath.lastIndexOf(".");
+    return dot !== -1 && ignoredExtensions.has(relPath.slice(dot).toLowerCase());
+}
 
 function read(relPath) {
+    if (isIgnored(relPath)) return null;
     const full = join(ROOT, relPath);
     return existsSync(full) ? readFileSync(full, "utf8") : null;
 }

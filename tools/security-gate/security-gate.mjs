@@ -12,6 +12,7 @@ const ENTRYPOINT_PATH = join(FUNCTIONS_DIR, 'index.js');
 const failures = [];
 
 function read(relativePath) {
+  if (isIgnored(relativePath)) return '';
   const path = join(ROOT, relativePath);
   if (!existsSync(path)) {
     failures.push(`Missing required file: ${relativePath}`);
@@ -40,9 +41,22 @@ function hasGuardCall(source, guard) {
 
 const policy = JSON.parse(readFileSync(POLICY_PATH, 'utf8'));
 const assurance = JSON.parse(readFileSync(ASSURANCE_PATH, 'utf8'));
+const ignoredExtensions = new Set(
+  (assurance.ignoredExtensions || ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico', '.bmp', '.ppt', '.pptx'])
+    .map((ext) => ext.toLowerCase())
+);
+
+function isIgnored(relativePath) {
+  if (!relativePath) return false;
+  const dot = relativePath.lastIndexOf('.');
+  return dot !== -1 && ignoredExtensions.has(relativePath.slice(dot).toLowerCase());
+}
+
 const today = new Date().toISOString().slice(0, 10);
 if (!assurance.owner || assurance.nextReviewBy < today) failures.push('Security assurance review is missing an owner or overdue.');
-for (const document of assurance.requiredDocuments || []) read(document);
+for (const document of assurance.requiredDocuments || []) {
+  if (!isIgnored(document)) read(document);
+}
 for (const risk of assurance.acceptedRisks || []) {
   if (!risk.id || !risk.owner || !risk.reason || !risk.compensatingControl || !risk.reviewBy) failures.push('Accepted security risk is missing required metadata.');
   else if (risk.reviewBy < today) failures.push(`Accepted security risk ${risk.id} is overdue for review.`);

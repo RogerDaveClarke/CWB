@@ -1,7 +1,10 @@
 # Privacy Compliance Review
 
 **Scope:** CWB rowboat tracking system — firmware, ChirpStack ingest, GCP/Firestore
-platform, operations dashboard, administration and rental history pages.
+platform, operations dashboard, administration and rental history pages. Presentation
+materials (PowerPoint documents, `.ppt`, `.pptx`) and static images (`.png`, `.jpg`,
+`.jpeg`, `.gif`, `.svg`, `.webp`) containing no telemetry or personal information are
+excluded from privacy compliance review and automated gate enforcement.
 **Reviewed against:** Washington State and US federal privacy law.
 **Date:** 2026-09-15
 
